@@ -1,0 +1,88 @@
+/* Base theme tokens and global resets */
+:root {
+  --color-bg-body: #000;
+  --color-text-body: #fff;
+  --color-surface: #2b2b2b;
+  --color-surface-alt: #3a3a3a;
+  --color-accent: #2f9e44;
+  --color-border: #444;
+  --color-navbar: #222;
+  --color-card-shadow: rgba(0, 0, 0, 0.4);
+  --color-footer-shadow: rgba(0, 0, 0, 0.2);
+  --font-family-base: "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  font-family: var(--font-family-base);
+  background-color: var(--color-bg-body);
+  color: var(--color-text-body);
+  overflow-x: hidden;
+}
+
+body {
+  background: transparent;
+  position: relative;
+}
+
+#starCanvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  display: block;
+  background: transparent;
+}
+
+a {
+  color: inherit;
+}
+
+a:hover,
+a:focus {
+  color: var(--color-accent);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.noscript-warning {
+  background: rgba(0, 0, 0, 0.85);
+  color: var(--color-text-body);
+  text-align: center;
+  padding: 1rem;
+}
+
+@media print {
+  *,
+  *::before,
+  *::after {
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  #starCanvas,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+  }
+}

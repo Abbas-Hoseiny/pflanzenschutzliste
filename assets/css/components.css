@@ -1,0 +1,76 @@
+/* Shared component styling */
+.card-dark {
+  background-color: var(--color-surface);
+  color: var(--color-text-body);
+  border: none;
+  box-shadow: 0 0 15px var(--color-card-shadow);
+}
+
+.card-dark .card-header {
+  background-color: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table-dark {
+  background-color: var(--color-surface);
+  color: var(--color-text-body);
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-dark thead tr {
+  background-color: var(--color-surface-alt);
+}
+
+.table-dark thead th {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table-dark tbody tr {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table-dark tbody tr:hover {
+  background-color: #464646;
+}
+
+.table-dark .table-responsive {
+  overflow: visible;
+}
+
+.btn-outline-light {
+  border-color: #ccc;
+}
+
+.form-control,
+.form-select {
+  background-color: #1f1f1f;
+  color: var(--color-text-body);
+  border: 1px solid var(--color-border);
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 0.2rem rgba(47, 158, 68, 0.25);
+}
+
+.tab-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.tab-nav button {
+  flex: 0 0 auto;
+}
+
+.badge-method {
+  background-color: rgba(47, 158, 68, 0.2);
+  color: var(--color-text-body);
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}

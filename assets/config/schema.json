@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://abbas-hoseiny.github.io/pflanzenschutzliste/schema.json",
+  "title": "Pflanzenschutzliste Database Schema",
+  "type": "object",
+  "required": ["meta", "mediums", "history"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["version", "company", "defaults", "measurementMethods"],
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "company": {
+          "type": "object",
+          "required": ["name", "logoUrl", "contactEmail"],
+          "properties": {
+            "name": { "type": "string" },
+            "logoUrl": { "type": "string" },
+            "contactEmail": { "type": "string" },
+            "address": { "type": "string" },
+            "accentColor": { "type": "string" }
+          }
+        },
+        "defaults": {
+          "type": "object",
+          "required": ["waterPerKisteL", "kistenProAr"],
+          "properties": {
+            "waterPerKisteL": { "type": "number", "minimum": 0 },
+            "kistenProAr": { "type": "number", "minimum": 0 }
+          }
+        },
+        "measurementMethods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "type", "requires"],
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "type": { "type": "string" },
+              "unit": { "type": "string" },
+              "requires": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "config": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "mediums": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "unit", "methodId", "value"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "unit": { "type": "string" },
+          "methodId": { "type": "string" },
+          "value": { "type": "number" }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}
