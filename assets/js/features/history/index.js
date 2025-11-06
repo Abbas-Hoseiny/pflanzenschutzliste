@@ -1,6 +1,6 @@
 import { getState } from '../../core/state.js';
 import { printHtml } from '../../core/print.js';
-import { renderCalculationSnapshot, renderCalculationSnapshotForPrint } from '../shared/calculationSnapshot.js';
+import { renderCalculationSnapshot, renderCalculationSnapshotForPrint, CARD_SELECTED_CLASS } from '../shared/calculationSnapshot.js';
 
 let initialized = false;
 const selectedIndexes = new Set();
@@ -324,10 +324,10 @@ export function initHistory(container, services) {
     }
     if (event.target.checked) {
       selectedIndexes.add(index);
-      event.target.closest('.calc-snapshot-card')?.classList.add('calc-snapshot-card--selected');
+      event.target.closest('.calc-snapshot-card')?.classList.add(CARD_SELECTED_CLASS);
     } else {
       selectedIndexes.delete(index);
-      event.target.closest('.calc-snapshot-card')?.classList.remove('calc-snapshot-card--selected');
+      event.target.closest('.calc-snapshot-card')?.classList.remove(CARD_SELECTED_CLASS);
     }
     updateSelectionUI(section);
   });

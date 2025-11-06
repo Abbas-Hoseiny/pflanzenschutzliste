@@ -15,6 +15,12 @@ function formatNumber(value) {
   return num.toFixed(2);
 }
 
+function safeStringValue(value) {
+  return escapeHtml(value || '');
+}
+
+const CARD_SELECTED_CLASS = 'calc-snapshot-card--selected';
+
 /**
  * Renders a calculation snapshot as a card.
  * @param {Object} entry - History entry object with calculation data
@@ -41,13 +47,13 @@ export function renderCalculationSnapshot(entry, labels, options = {}) {
   const calcFields = labels.calculation.fields;
   const calcColumns = labels.calculation.tableColumns;
   
-  const creator = escapeHtml(entry.ersteller || '');
-  const location = escapeHtml(entry.standort || '');
-  const crop = escapeHtml(entry.kultur || '');
-  const date = escapeHtml(entry.datum || entry.date || '');
+  const creator = safeStringValue(entry.ersteller);
+  const location = safeStringValue(entry.standort);
+  const crop = safeStringValue(entry.kultur);
+  const date = safeStringValue(entry.datum || entry.date);
   const quantity = escapeHtml(entry.kisten != null ? String(entry.kisten) : '');
   
-  const selectedClass = selected ? ' calc-snapshot-card--selected' : '';
+  const selectedClass = selected ? ` ${CARD_SELECTED_CLASS}` : '';
   
   const checkboxHtml = includeCheckbox && !forPrint ? `
     <div class="snapshot-select no-print">
@@ -57,9 +63,9 @@ export function renderCalculationSnapshot(entry, labels, options = {}) {
   
   const mediumsHtml = (entry.items || [])
     .map(item => {
-      const name = escapeHtml(item.name || '');
-      const unit = escapeHtml(item.unit || '');
-      const method = escapeHtml(item.methodLabel || item.methodId || '');
+      const name = safeStringValue(item.name);
+      const unit = safeStringValue(item.unit);
+      const method = safeStringValue(item.methodLabel || item.methodId);
       const value = formatNumber(item.value);
       const total = formatNumber(item.total);
       const totalDisplay = total === '-' ? '-' : `${total} ${unit}`.trim();
@@ -150,3 +156,5 @@ export function renderCalculationSnapshot(entry, labels, options = {}) {
 export function renderCalculationSnapshotForPrint(entry, labels) {
   return renderCalculationSnapshot(entry, labels, { forPrint: true });
 }
+
+export { CARD_SELECTED_CLASS };
