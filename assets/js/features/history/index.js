@@ -1,5 +1,6 @@
 import { getState } from '../../core/state.js';
 import { printHtml } from '../../core/print.js';
+import { renderCalculationSnapshot, renderCalculationSnapshotForPrint } from '../shared/calculationSnapshot.js';
 
 let initialized = false;
 const selectedIndexes = new Set();
@@ -34,22 +35,7 @@ function createSection() {
           <button class="btn btn-outline-light btn-sm" data-action="print-selected" disabled>Ausgewählte drucken</button>
         </div>
         <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-dark table-bordered align-middle" id="history-table">
-              <thead>
-                <tr>
-                  <th class="no-print text-center" style="width: 3rem;">Auswahl</th>
-                  <th>Datum</th>
-                  <th>Erstellt von</th>
-                  <th>Standort</th>
-                  <th>Kultur</th>
-                  <th>Kisten</th>
-                  <th>Aktion</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div data-role="history-list"></div>
         </div>
       </div>
       <div class="card card-dark mt-4 d-none" id="history-detail">
@@ -65,48 +51,31 @@ function createSection() {
 
 function renderTable(state, section, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
-  const tbody = section.querySelector('#history-table tbody');
-  const thead = section.querySelector('#history-table thead');
-  tbody.innerHTML = '';
-  if (thead) {
-    thead.innerHTML = `
-      <tr>
-        <th class="no-print text-center" style="width: 3rem;">Auswahl</th>
-        <th>${escapeHtml(resolvedLabels.history.tableColumns.date)}</th>
-        <th>${escapeHtml(resolvedLabels.history.tableColumns.creator)}</th>
-        <th>${escapeHtml(resolvedLabels.history.tableColumns.location)}</th>
-        <th>${escapeHtml(resolvedLabels.history.tableColumns.crop)}</th>
-        <th>${escapeHtml(resolvedLabels.history.tableColumns.quantity)}</th>
-        <th>Aktion</th>
-      </tr>
-    `;
-  }
+  const container = section.querySelector('[data-role="history-list"]');
+  container.innerHTML = '';
+  
   for (const idx of Array.from(selectedIndexes)) {
     if (!state.history[idx]) {
       selectedIndexes.delete(idx);
     }
   }
+  
   state.history.forEach((entry, index) => {
-    const row = document.createElement('tr');
-    if (selectedIndexes.has(index)) {
-      row.classList.add('table-active');
-    }
-    row.innerHTML = `
-      <td class="no-print text-center">
-        <input type="checkbox" class="form-check-input" data-action="toggle-select" data-index="${index}" ${selectedIndexes.has(index) ? 'checked' : ''} />
-      </td>
-      <td>${escapeHtml(entry.datum || entry.date || '')}</td>
-      <td>${escapeHtml(entry.ersteller || '')}</td>
-      <td>${escapeHtml(entry.standort || '')}</td>
-      <td>${escapeHtml(entry.kultur || '')}</td>
-      <td>${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}</td>
-      <td>
-        <button class="btn btn-sm btn-info" data-action="view" data-index="${index}">Ansehen</button>
-        <button class="btn btn-sm btn-danger" data-action="delete" data-index="${index}">Löschen</button>
-      </td>
-    `;
-    tbody.appendChild(row);
+    const cardHtml = renderCalculationSnapshot(entry, resolvedLabels, {
+      showActions: true,
+      includeCheckbox: true,
+      index: index,
+      selected: selectedIndexes.has(index)
+    });
+    
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = cardHtml;
+    container.appendChild(wrapper.firstElementChild);
   });
+  
+  if (state.history.length === 0) {
+    container.innerHTML = '<p class="text-muted text-center">Keine Einträge vorhanden</p>';
+  }
 }
 
 function renderDetail(entry, section, index = null, labels) {
@@ -120,52 +89,15 @@ function renderDetail(entry, section, index = null, labels) {
   }
   detailCard.dataset.index = index !== null ? String(index) : '';
   const resolvedLabels = labels || getState().fieldLabels;
-  const tableLabels = resolvedLabels.history.tableColumns;
-  const detailLabels = resolvedLabels.history.detail;
-  const calcColumns = resolvedLabels.calculation.tableColumns;
+  
+  const snapshotHtml = renderCalculationSnapshot(entry, resolvedLabels, {
+    showActions: false,
+    includeCheckbox: false
+  });
+  
   detailBody.innerHTML = `
-    <p>
-      <strong>${escapeHtml(tableLabels.date)}:</strong> ${escapeHtml(entry.datum || entry.date || '')}<br />
-      <strong>${escapeHtml(detailLabels.creator)}:</strong> ${escapeHtml(entry.ersteller || '')}<br />
-      <strong>${escapeHtml(detailLabels.location)}:</strong> ${escapeHtml(entry.standort || '')}<br />
-      <strong>${escapeHtml(detailLabels.crop)}:</strong> ${escapeHtml(entry.kultur || '')}<br />
-      <strong>${escapeHtml(detailLabels.quantity)}:</strong> ${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}
-    </p>
-    <div class="table-responsive">
-      <table class="table table-dark table-striped">
-        <thead>
-          <tr>
-            <th>${escapeHtml(calcColumns.medium)}</th>
-            <th>${escapeHtml(calcColumns.unit)}</th>
-            <th>${escapeHtml(calcColumns.method)}</th>
-            <th>${escapeHtml(calcColumns.value)}</th>
-            <th>${escapeHtml(calcColumns.total)}</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${(entry.items || [])
-            .map(item => {
-              const name = escapeHtml(item.name || '');
-              const unit = escapeHtml(item.unit || '');
-              const method = escapeHtml(item.methodLabel || item.methodId || '');
-              const value = formatNumber(item.value);
-              const total = formatNumber(item.total);
-              const totalDisplay = total === '-' ? '-' : `${total} ${unit}`.trim();
-              return `
-                <tr>
-                  <td>${name}</td>
-                  <td>${unit}</td>
-                  <td>${method}</td>
-                  <td>${value}</td>
-                  <td>${totalDisplay}</td>
-                </tr>
-              `;
-            })
-            .join('')}
-        </tbody>
-      </table>
-    </div>
-    <button class="btn btn-outline-secondary no-print" data-action="detail-print">Drucken / PDF</button>
+    ${snapshotHtml}
+    <button class="btn btn-outline-secondary no-print mt-3" data-action="detail-print">Drucken / PDF</button>
   `;
   detailCard.classList.remove('d-none');
 }
@@ -235,77 +167,29 @@ function mediumsList(items) {
 
 function buildSummaryTable(entries, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
-  const tableLabels = resolvedLabels.history.tableColumns;
   const summaryTitle = resolvedLabels.history.summaryTitle;
-  const mediumsHeading = resolvedLabels.history.mediumsHeading;
-  const rows = entries
-    .map(entry => `
-      <tr>
-        <td class="nowrap">${escapeHtml(entry.datum || entry.date || '')}</td>
-        <td>${escapeHtml(entry.ersteller || '')}</td>
-        <td>${escapeHtml(entry.standort || '')}</td>
-        <td>${escapeHtml(entry.kultur || '')}</td>
-        <td class="nowrap">${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}</td>
-        <td>${mediumsList(entry.items)}</td>
-      </tr>
-    `)
+  
+  const cards = entries
+    .map(entry => renderCalculationSnapshotForPrint(entry, resolvedLabels))
     .join('');
+  
   return `
     <section class="history-summary">
       <h2>${escapeHtml(summaryTitle)}</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>${escapeHtml(tableLabels.date)}</th>
-            <th>${escapeHtml(tableLabels.creator)}</th>
-            <th>${escapeHtml(tableLabels.location)}</th>
-            <th>${escapeHtml(tableLabels.crop)}</th>
-            <th>${escapeHtml(tableLabels.quantity)}</th>
-            <th>${escapeHtml(mediumsHeading)}</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      ${cards}
     </section>
   `;
 }
 
 function buildDetailSection(entry, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
-  const rows = (entry.items || [])
-    .map(item => `
-      <tr>
-        <td>${escapeHtml(item.name)}</td>
-        <td class="nowrap">${escapeHtml(item.unit)}</td>
-        <td>${escapeHtml(item.methodLabel || item.methodId || '')}</td>
-        <td class="nowrap">${formatNumber(item.value)}</td>
-        <td class="nowrap">${formatNumber(item.total)} ${escapeHtml(item.unit)}</td>
-      </tr>
-    `)
-    .join('');
-  const detailLabels = resolvedLabels.history.detail;
-  const calcColumns = resolvedLabels.calculation.tableColumns;
+  const detailTitle = resolvedLabels.history.detail.title;
+  const date = escapeHtml(entry.datum || entry.date || '');
+  
   return `
     <section class="history-detail">
-      <h2>${escapeHtml(detailLabels.title)} – ${escapeHtml(entry.datum || entry.date || '')}</h2>
-      <p>
-        <strong>${escapeHtml(detailLabels.creator)}:</strong> ${escapeHtml(entry.ersteller || '')}<br />
-        <strong>${escapeHtml(detailLabels.location)}:</strong> ${escapeHtml(entry.standort || '')}<br />
-        <strong>${escapeHtml(detailLabels.crop)}:</strong> ${escapeHtml(entry.kultur || '')}<br />
-        <strong>${escapeHtml(detailLabels.quantity)}:</strong> ${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}
-      </p>
-      <table>
-        <thead>
-          <tr>
-            <th>${escapeHtml(calcColumns.medium)}</th>
-            <th>${escapeHtml(calcColumns.unit)}</th>
-            <th>${escapeHtml(calcColumns.method)}</th>
-            <th>${escapeHtml(calcColumns.value)}</th>
-            <th>${escapeHtml(calcColumns.total)}</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <h2>${escapeHtml(detailTitle)} – ${date}</h2>
+      ${renderCalculationSnapshotForPrint(entry, resolvedLabels)}
     </section>
   `;
 }
@@ -440,10 +324,10 @@ export function initHistory(container, services) {
     }
     if (event.target.checked) {
       selectedIndexes.add(index);
-      event.target.closest('tr')?.classList.add('table-active');
+      event.target.closest('.calc-snapshot-card')?.classList.add('calc-snapshot-card--selected');
     } else {
       selectedIndexes.delete(index);
-      event.target.closest('tr')?.classList.remove('table-active');
+      event.target.closest('.calc-snapshot-card')?.classList.remove('calc-snapshot-card--selected');
     }
     updateSelectionUI(section);
   });

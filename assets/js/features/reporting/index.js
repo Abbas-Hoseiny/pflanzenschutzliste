@@ -1,5 +1,6 @@
 import { getState } from '../../core/state.js';
 import { printHtml } from '../../core/print.js';
+import { renderCalculationSnapshot, renderCalculationSnapshotForPrint } from '../shared/calculationSnapshot.js';
 
 let initialized = false;
 let currentEntries = [];
@@ -35,21 +36,7 @@ function createSection() {
           <button class="btn btn-outline-light btn-sm" data-action="print-report" disabled>Drucken</button>
         </div>
         <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-dark table-bordered" id="report-table">
-              <thead>
-                <tr>
-                  <th>Datum</th>
-                  <th>Erstellt von</th>
-                  <th>Standort</th>
-                  <th>Kultur</th>
-                  <th>Kisten</th>
-                  <th>Mittel &amp; Gesamtmengen</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div data-role="report-list"></div>
         </div>
       </div>
     </div>
@@ -100,41 +87,27 @@ function germanDateToIso(value) {
 
 function renderTable(section, entries, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
-  const tbody = section.querySelector('#report-table tbody');
-  const thead = section.querySelector('#report-table thead');
-  tbody.innerHTML = '';
+  const container = section.querySelector('[data-role="report-list"]');
+  container.innerHTML = '';
   const info = section.querySelector('[data-role="report-info"]');
   const printButton = section.querySelector('[data-action="print-report"]');
   currentEntries = entries.slice();
-  if (thead) {
-    const tableLabels = resolvedLabels.reporting.tableColumns;
-    thead.innerHTML = `
-      <tr>
-        <th>${escapeHtml(tableLabels.date)}</th>
-        <th>${escapeHtml(tableLabels.creator)}</th>
-        <th>${escapeHtml(tableLabels.location)}</th>
-        <th>${escapeHtml(tableLabels.crop)}</th>
-        <th>${escapeHtml(tableLabels.quantity)}</th>
-        <th>${escapeHtml(tableLabels.mediums)}</th>
-      </tr>
-    `;
-  }
-  entries.forEach(entry => {
-    const row = document.createElement('tr');
-    const mittelHtml = (entry.items || [])
-      .map(formatMediumLine)
-      .map(line => `<div>${line}</div>`)
-      .join('');
-    row.innerHTML = `
-      <td>${escapeHtml(entry.datum || entry.date || '')}</td>
-      <td>${escapeHtml(entry.ersteller || '')}</td>
-      <td>${escapeHtml(entry.standort || '')}</td>
-      <td>${escapeHtml(entry.kultur || '')}</td>
-      <td>${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}</td>
-      <td>${mittelHtml}</td>
-    `;
-    tbody.appendChild(row);
+  
+  entries.forEach((entry, index) => {
+    const cardHtml = renderCalculationSnapshot(entry, resolvedLabels, {
+      showActions: false,
+      includeCheckbox: false
+    });
+    
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = cardHtml;
+    container.appendChild(wrapper.firstElementChild);
   });
+  
+  if (entries.length === 0) {
+    container.innerHTML = '<p class="text-muted text-center">Keine Einträge vorhanden</p>';
+  }
+  
   if (info) {
     info.textContent = describeFilter(entries.length, resolvedLabels);
   }
@@ -286,37 +259,16 @@ function buildFilterInfo(filter, labels) {
 
 function buildReportTable(entries, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
-  const tableLabels = resolvedLabels.reporting.tableColumns;
-  const rows = entries
-    .map(entry => `
-      <tr>
-        <td>${escapeHtml(entry.datum || entry.date || '')}</td>
-        <td>${escapeHtml(entry.ersteller || '')}</td>
-        <td>${escapeHtml(entry.standort || '')}</td>
-        <td>${escapeHtml(entry.kultur || '')}</td>
-        <td class="nowrap">${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}</td>
-        <td>${(entry.items || [])
-          .map(formatMediumLine)
-          .join('<br />')}</td>
-      </tr>
-    `)
+  const printTitle = resolvedLabels.reporting.printTitle;
+  
+  const cards = entries
+    .map(entry => renderCalculationSnapshotForPrint(entry, resolvedLabels))
     .join('');
+  
   return `
     <section class="report-summary">
-  <h2>${escapeHtml(resolvedLabels.reporting.printTitle)}</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>${escapeHtml(tableLabels.date)}</th>
-            <th>${escapeHtml(tableLabels.creator)}</th>
-            <th>${escapeHtml(tableLabels.location)}</th>
-            <th>${escapeHtml(tableLabels.crop)}</th>
-            <th>${escapeHtml(tableLabels.quantity)}</th>
-            <th>${escapeHtml(tableLabels.mediums)}</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <h2>${escapeHtml(printTitle)}</h2>
+      ${cards}
     </section>
   `;
 }
