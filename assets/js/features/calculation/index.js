@@ -60,6 +60,9 @@ function createSection(labels, defaultsState) {
           <h5 class="mb-0" data-label-id="calc-result-title">${escapeHtml(labels.calculation.resultTitle)}</h5>
         </div>
         <div class="card-body">
+          <div class="calc-company text-center mb-3 d-none">
+            <h4 class="calc-company-name mb-0" data-field="company"></h4>
+          </div>
           <div class="calc-summary mb-3">
             <p class="mb-1"><strong data-label-id="calc-summary-creator">${escapeHtml(labels.calculation.fields.creator.label)}</strong>: <span data-field="ersteller"></span></p>
             <p class="mb-1"><strong data-label-id="calc-summary-location">${escapeHtml(labels.calculation.fields.location.label)}</strong>: <span data-field="standort"></span></p>
@@ -220,6 +223,7 @@ export function initCalculation(container, services) {
   const resultCard = section.querySelector('#calc-result');
   const resultsBody = section.querySelector('#calc-results-table tbody');
   const fieldEls = {
+    company: resultCard.querySelector('[data-field="company-name"]'),
     ersteller: resultCard.querySelector('[data-field="ersteller"]'),
     standort: resultCard.querySelector('[data-field="standort"]'),
     kultur: resultCard.querySelector('[data-field="kultur"]'),
@@ -279,6 +283,14 @@ export function initCalculation(container, services) {
     setFieldText('standort', header.standort);
     setFieldText('kultur', header.kultur);
     setFieldText('datum', header.datum);
+    const companyName = getState().company?.name || '';
+    const companyEl = setFieldText('company', companyName);
+    if (companyEl) {
+      const wrapper = companyEl.closest('.calc-company');
+      if (wrapper) {
+        wrapper.classList.toggle('d-none', !companyName);
+      }
+    }
 
     resultsBody.innerHTML = '';
     items.forEach(item => {

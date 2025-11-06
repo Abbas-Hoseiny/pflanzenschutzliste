@@ -6,6 +6,32 @@ const SECTION_MAP = [
 ];
 
 let initialized = false;
+let printHooksInstalled = false;
+let isPrinting = false;
+let activeDocumentTitle = document.title || 'Pflanzenschutz';
+
+function ensurePrintHooks() {
+  if (printHooksInstalled) {
+    return;
+  }
+  const beforePrint = () => {
+    if (isPrinting) {
+      return;
+    }
+    isPrinting = true;
+    document.title = ' ';
+  };
+  const afterPrint = () => {
+    if (!isPrinting) {
+      return;
+    }
+    isPrinting = false;
+    document.title = activeDocumentTitle;
+  };
+  window.addEventListener('beforeprint', beforePrint);
+  window.addEventListener('afterprint', afterPrint);
+  printHooksInstalled = true;
+}
 
 export function initShell(regions, services) {
   if (initialized) {
@@ -72,10 +98,10 @@ export function initShell(regions, services) {
     }
 
     nav.style.setProperty('--accent-color', company.accentColor || '');
-    if (company.name) {
-      document.title = `${company.name} – Pflanzenschutz`;
-    } else {
-      document.title = 'Pflanzenschutz';
+    const nextTitle = company.name ? `${company.name} – Pflanzenschutz` : 'Pflanzenschutz';
+    activeDocumentTitle = nextTitle;
+    if (!isPrinting) {
+      document.title = nextTitle;
     }
 
     const buttons = nav.querySelectorAll('[data-section]');
@@ -95,6 +121,7 @@ export function initShell(regions, services) {
   }
 
   updateShell(services.state.getState());
+  ensurePrintHooks();
   services.state.subscribe((nextState) => updateShell(nextState));
 
   shell.innerHTML = '';
