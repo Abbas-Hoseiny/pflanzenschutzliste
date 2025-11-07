@@ -47,21 +47,36 @@ export function initStartup(container, services) {
 
   const landingSection = document.createElement('section');
   landingSection.className = 'section-container';
+  
+  // Check which storage driver is active
+  const activeDriver = getActiveDriverKey();
+  const usingSQLite = activeDriver === 'sqlite';
+  const storageInfo = usingSQLite 
+    ? 'Mit SQLite-WASM für optimale Performance bei großen Datenmengen.' 
+    : 'Die erzeugte JSON-Datei kann später erneut geladen oder weitergegeben werden.';
+  
   landingSection.innerHTML = `
     <div class="section-inner">
       <div class="card card-dark">
         <div class="card-body text-center">
           <h2 class="mb-3">Datenbank starten</h2>
           <p class="mb-4">
-            Erstelle eine neue Datenbank mit deinen Stammdaten oder verbinde eine vorhandene JSON-Datei.
+            Erstelle eine neue Datenbank mit deinen Stammdaten oder verbinde eine vorhandene Datei.
           </p>
+          ${usingSQLite ? `
+          <div class="alert alert-info text-start mb-4">
+            <strong>🚀 SQLite-WASM aktiviert</strong><br>
+            Ihre Daten werden in einer performanten SQLite-Datenbank gespeichert.
+            Import und Export von JSON-Dateien wird weiterhin unterstützt.
+          </div>
+          ` : ''}
           <div class="d-flex flex-column flex-md-row gap-3 justify-content-center">
             <button class="btn btn-success px-4" data-action="start-wizard">Neue Datenbank erstellen</button>
             <button class="btn btn-outline-light px-4" data-action="open">Bestehende Datei verbinden</button>
             <button class="btn btn-secondary px-4" data-action="useDefaults">Defaults testen</button>
           </div>
           <p class="mt-3 text-muted mb-0 small">
-            Die erzeugte JSON-Datei kann später erneut geladen oder weitergegeben werden.
+            ${storageInfo}
           </p>
         </div>
       </div>

@@ -1,13 +1,18 @@
 import * as fileSystemDriver from './fileSystem.js';
 import * as fallbackDriver from './fallback.js';
+import * as sqliteDriver from './sqlite.js';
 import { getState, patchState } from '../state.js';
 
 const DRIVERS = {
+  sqlite: sqliteDriver,
   fileSystem: fileSystemDriver,
   fallback: fallbackDriver
 };
 
 export function detectPreferredDriver() {
+  if (sqliteDriver.isSupported()) {
+    return 'sqlite';
+  }
   if (fileSystemDriver.isSupported()) {
     return 'fileSystem';
   }
