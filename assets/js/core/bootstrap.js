@@ -10,6 +10,7 @@ import { initCalculation } from '../features/calculation/index.js';
 import { initHistory } from '../features/history/index.js';
 import { initSettings } from '../features/settings/index.js';
 import { initReporting } from '../features/reporting/index.js';
+import { initZulassung } from '../features/zulassung/index.js';
 
 function setupUnloadWarning(stateService) {
   const handler = event => {
@@ -73,6 +74,7 @@ export async function bootstrap() {
   initStartup(regions.startup, services);
   initCalculation(regions.main, services);
   initHistory(regions.main, services);
+  initZulassung(regions.main, services);
   initSettings(regions.main, services);
   initReporting(regions.main, services);
   setupUnloadWarning(services.state);

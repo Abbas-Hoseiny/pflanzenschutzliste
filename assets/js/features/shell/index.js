@@ -1,6 +1,7 @@
 const SECTION_MAP = [
   { id: 'calc', label: 'Berechnung' },
   { id: 'history', label: 'Historie' },
+  { id: 'zulassung', label: 'Zulassung' },
   { id: 'settings', label: 'Einstellungen' },
   { id: 'report', label: 'Auswertung' }
 ];
