@@ -59,6 +59,9 @@ self.onmessage = async function (event) {
       case "importBvlDataset":
         result = await importBvlDataset(payload);
         break;
+      case "importBvlSqlite":
+        result = await importBvlSqlite(payload);
+        break;
       case "getBvlMeta":
         result = await getBvlMeta(payload);
         break;
@@ -1067,6 +1070,241 @@ async function importBvlDataset(payload) {
   } catch (error) {
     db.exec("ROLLBACK");
     console.error("Failed to import BVL dataset:", error);
+    throw error;
+  }
+}
+
+async function importBvlSqlite(payload) {
+  if (!db) throw new Error("Database not initialized");
+  if (!sqlite3) throw new Error("SQLite not initialized");
+
+  const { data, manifest } = payload;
+  
+  if (!data || !(data instanceof Uint8Array || data instanceof Array)) {
+    throw new Error("Invalid data: expected Uint8Array or Array");
+  }
+
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+  // Create a temporary in-memory database with the imported data
+  const remoteDb = new sqlite3.oo1.DB();
+  
+  // Deserialize the database
+  const scope = sqlite3.wasm.scopedAllocPush();
+  try {
+    const pData = sqlite3.wasm.allocFromTypedArray(bytes);
+    const pSchema = sqlite3.wasm.allocCString("main");
+    const flags =
+      (sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE || 0) |
+      (sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE || 0);
+    const rc = sqlite3.capi.sqlite3_deserialize(
+      remoteDb.pointer,
+      pSchema,
+      pData,
+      bytes.byteLength,
+      bytes.byteLength,
+      flags
+    );
+    if (rc !== sqlite3.capi.SQLITE_OK) {
+      remoteDb.close();
+      throw new Error(
+        `sqlite3_deserialize failed: ${
+          sqlite3.capi.sqlite3_js_rc_str(rc) || rc
+        }`
+      );
+    }
+  } finally {
+    sqlite3.wasm.scopedAllocPop(scope);
+  }
+
+  // Get list of BVL tables from remote database
+  const bvlTables = [];
+  remoteDb.exec({
+    sql: "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'bvl_%' ORDER BY name",
+    callback: (row) => {
+      bvlTables.push(row[0]);
+    },
+  });
+
+  console.log(`Found ${bvlTables.length} BVL tables in remote database:`, bvlTables);
+
+  // Begin transaction on main database
+  db.exec("BEGIN TRANSACTION");
+
+  try {
+    const counts = {};
+
+    // Import each BVL table
+    for (const tableName of bvlTables) {
+      // Skip sync log as we don't want to overwrite it
+      if (tableName === "bvl_sync_log") {
+        continue;
+      }
+
+      // Get column names from remote table
+      const columns = [];
+      remoteDb.exec({
+        sql: `PRAGMA table_info(${tableName})`,
+        callback: (row) => {
+          columns.push(row[1]); // column name
+        },
+      });
+
+      if (columns.length === 0) {
+        console.warn(`Table ${tableName} has no columns, skipping`);
+        continue;
+      }
+
+      // Check if table exists in main database
+      let tableExists = false;
+      db.exec({
+        sql: "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        bind: [tableName],
+        callback: () => {
+          tableExists = true;
+        },
+      });
+
+      if (!tableExists) {
+        // Create the table by copying schema from remote
+        const createSql = remoteDb.selectValue(
+          `SELECT sql FROM sqlite_master WHERE type='table' AND name = ?`,
+          [tableName]
+        );
+        if (createSql) {
+          console.log(`Creating table ${tableName}`);
+          db.exec(createSql);
+        } else {
+          console.warn(`Could not get CREATE statement for ${tableName}, skipping`);
+          continue;
+        }
+      }
+
+      // Delete existing data from main table
+      db.exec(`DELETE FROM ${tableName}`);
+
+      // Get columns that exist in main table
+      const mainColumns = [];
+      db.exec({
+        sql: `PRAGMA table_info(${tableName})`,
+        callback: (row) => {
+          mainColumns.push(row[1]);
+        },
+      });
+
+      // Find common columns
+      const commonColumns = columns.filter((col) => mainColumns.includes(col));
+      
+      if (commonColumns.length === 0) {
+        console.warn(`No common columns between remote and main ${tableName}, skipping`);
+        continue;
+      }
+
+      const colList = commonColumns.join(", ");
+
+      // Attach remote database
+      db.exec(`ATTACH DATABASE ':memory:' AS remote`);
+      
+      // Copy the remote database into the attached database
+      const remoteCopy = new sqlite3.oo1.DB(":memory:");
+      const remoteExport = sqlite3.capi.sqlite3_js_db_export(remoteDb.pointer);
+      
+      const scope2 = sqlite3.wasm.scopedAllocPush();
+      try {
+        const pData2 = sqlite3.wasm.allocFromTypedArray(remoteExport);
+        const pSchema2 = sqlite3.wasm.allocCString("main");
+        const flags2 =
+          (sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE || 0) |
+          (sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE || 0);
+        const rc2 = sqlite3.capi.sqlite3_deserialize(
+          remoteCopy.pointer,
+          pSchema2,
+          pData2,
+          remoteExport.byteLength,
+          remoteExport.byteLength,
+          flags2
+        );
+        if (rc2 !== sqlite3.capi.SQLITE_OK) {
+          throw new Error(`Failed to copy remote database: ${rc2}`);
+        }
+      } finally {
+        sqlite3.wasm.scopedAllocPop(scope2);
+      }
+
+      // Instead of ATTACH, let's copy data row by row
+      const rows = [];
+      remoteDb.exec({
+        sql: `SELECT ${colList} FROM ${tableName}`,
+        callback: (row) => {
+          rows.push([...row]);
+        },
+      });
+
+      if (rows.length > 0) {
+        const placeholders = commonColumns.map(() => "?").join(", ");
+        const insertSql = `INSERT OR REPLACE INTO ${tableName} (${colList}) VALUES (${placeholders})`;
+        const stmt = db.prepare(insertSql);
+
+        for (const row of rows) {
+          stmt.bind(row).step();
+          stmt.reset();
+        }
+        stmt.finalize();
+
+        counts[tableName] = rows.length;
+        console.log(`Imported ${rows.length} rows into ${tableName}`);
+      } else {
+        counts[tableName] = 0;
+      }
+
+      remoteCopy.close();
+    }
+
+    // Update metadata from manifest
+    if (manifest) {
+      const metaUpdates = {
+        dataSource: `pflanzenschutz-db@${manifest.version}`,
+        lastSyncIso: new Date().toISOString(),
+        lastSyncHash: manifest.hash || manifest.version,
+      };
+
+      if (manifest.tables) {
+        metaUpdates.lastSyncCounts = JSON.stringify(manifest.tables);
+      }
+
+      if (manifest.api_version) {
+        metaUpdates.apiStand = manifest.api_version;
+      } else if (manifest.build && manifest.build.finished_at) {
+        metaUpdates.apiStand = manifest.build.finished_at;
+      }
+
+      const metaStmt = db.prepare(
+        "INSERT OR REPLACE INTO bvl_meta (key, value) VALUES (?, ?)"
+      );
+      for (const [key, value] of Object.entries(metaUpdates)) {
+        metaStmt
+          .bind([key, typeof value === "string" ? value : JSON.stringify(value)])
+          .step();
+        metaStmt.reset();
+      }
+      metaStmt.finalize();
+    }
+
+    // Verify database integrity
+    const integrityResult = db.selectValue("PRAGMA integrity_check");
+    if (integrityResult !== "ok") {
+      throw new Error(`Database integrity check failed: ${integrityResult}`);
+    }
+
+    db.exec("COMMIT");
+    remoteDb.close();
+
+    console.log("BVL SQLite import complete", counts);
+    return { success: true, counts };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    remoteDb.close();
+    console.error("Failed to import BVL SQLite:", error);
     throw error;
   }
 }
