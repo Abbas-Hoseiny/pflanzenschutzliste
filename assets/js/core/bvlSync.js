@@ -1,9 +1,18 @@
 /**
  * BVL Sync Orchestrator
  * Coordinates fetching and storing BVL data with progress reporting
+ * Supports both manifest-based (preferred) and direct API sync (fallback)
  */
 
 import { fetchCollection, computeDatasetHashes } from "./bvlClient.js";
+import {
+  fetchManifest,
+  downloadDatabase,
+  ManifestError,
+  DownloadError,
+} from "./bvlDataset.js";
+
+const USE_MANIFEST_SYNC = true; // Feature flag for manifest-based sync
 
 const ENDPOINTS = [
   "mittel",
@@ -59,15 +68,187 @@ export async function syncBvlData(storage, options = {}) {
       throw new Error("Keine Internetverbindung verfügbar");
     }
 
-    const datasets = {};
-    const fetchTimes = {};
-    let totalProgress = 0;
-    const fetchTasks = [
-      ...ENDPOINTS.map((endpoint) => ({ type: "dataset", endpoint })),
-      ...LOOKUP_CONFIG.map((lookup) => ({ type: "lookup", ...lookup })),
-    ];
-    const progressPerTask = 70 / fetchTasks.length;
+    // Try manifest-based sync first if enabled
+    if (USE_MANIFEST_SYNC) {
+      try {
+        return await syncFromManifest(storage, { onProgress, onLog, log, startTime });
+      } catch (error) {
+        log("warn", "Manifest-based sync failed, falling back to API sync", {
+          error: error.message,
+        });
+        // Fall through to API sync
+      }
+    }
 
+    // Fallback to direct API sync
+    return await syncFromApi(storage, { onProgress, onLog, log, startTime });
+  } catch (error) {
+    const errorMessage = error.message || "Unbekannter Fehler";
+    log("error", "Sync failed", { error: errorMessage, stack: error.stack });
+
+    const meta = {
+      lastError: errorMessage,
+      lastErrorTime: new Date().toISOString(),
+    };
+
+    try {
+      await storage.setBvlMeta("lastError", errorMessage);
+      await storage.appendBvlSyncLog({
+        synced_at: new Date().toISOString(),
+        ok: 0,
+        message: errorMessage,
+        payload_hash: null,
+      });
+    } catch (e) {
+      log("error", "Failed to write error state", { error: e.message });
+    }
+
+    onProgress({
+      step: "error",
+      percent: 0,
+      message: `Fehler: ${errorMessage}`,
+    });
+
+    throw error;
+  }
+}
+
+/**
+ * Sync from manifest-based database
+ */
+async function syncFromManifest(storage, { onProgress, onLog, log, startTime }) {
+  onProgress({
+    step: "manifest",
+    percent: 5,
+    message: "Lade Manifest...",
+  });
+  log("info", "Fetching manifest");
+
+  const manifest = await fetchManifest();
+  log("info", "Manifest loaded", {
+    version: manifest.version,
+    files: manifest.files.length,
+  });
+
+  // Check if we need to update
+  const previousHash = await storage.getBvlMeta("lastSyncHash");
+  const manifestHash = manifest.hash || manifest.version;
+
+  if (previousHash === manifestHash) {
+    onProgress({
+      step: "done",
+      percent: 100,
+      message: "Keine Aktualisierung erforderlich",
+    });
+
+    const meta = {
+      lastSyncHash: manifestHash,
+      lastSyncIso: new Date().toISOString(),
+      lastSyncCounts: manifest.tables || {},
+      lastError: null,
+    };
+
+    await storage.appendBvlSyncLog({
+      synced_at: meta.lastSyncIso,
+      ok: 1,
+      message: "no-change (manifest)",
+      payload_hash: manifestHash,
+    });
+
+    log("info", "No changes detected, sync complete");
+    return { status: "no-change", meta, manifest };
+  }
+
+  onProgress({
+    step: "download",
+    percent: 10,
+    message: "Lade Datenbank...",
+  });
+  log("info", "Downloading database from manifest");
+
+  const { data, format } = await downloadDatabase(manifest, {
+    onProgress: (progress) => {
+      if (progress.step === "download") {
+        onProgress({
+          step: "download",
+          percent: 10 + Math.round(progress.percent * 0.5), // 10-60%
+          message: progress.message,
+        });
+      } else if (progress.step === "decompress") {
+        onProgress({
+          step: "decompress",
+          percent: 60 + Math.round((progress.percent - 70) * 0.2), // 60-70%
+          message: progress.message,
+        });
+      }
+    },
+  });
+
+  log("info", `Database downloaded (${format}, ${data.length} bytes)`);
+
+  onProgress({
+    step: "import",
+    percent: 70,
+    message: "Importiere Datenbank...",
+  });
+  log("info", "Importing database");
+
+  const importStart = Date.now();
+  const result = await storage.importBvlSqlite(data, manifest);
+  const importDuration = Date.now() - importStart;
+
+  log("info", `Database import complete in ${importDuration}ms`, {
+    counts: result.counts,
+  });
+
+  onProgress({
+    step: "verify",
+    percent: 95,
+    message: "Verifiziere Daten...",
+  });
+  log("info", "Verifying data");
+
+  const totalDuration = Date.now() - startTime;
+  await storage.appendBvlSyncLog({
+    synced_at: new Date().toISOString(),
+    ok: 1,
+    message: `success (manifest, ${totalDuration}ms)`,
+    payload_hash: manifestHash,
+  });
+
+  onProgress({
+    step: "done",
+    percent: 100,
+    message: "Synchronisation abgeschlossen",
+  });
+
+  const meta = {
+    lastSyncHash: manifestHash,
+    lastSyncIso: new Date().toISOString(),
+    lastSyncCounts: result.counts,
+    dataSource: `pflanzenschutz-db@${manifest.version}`,
+    lastError: null,
+  };
+
+  log("info", `Sync complete in ${totalDuration}ms`, { meta, manifest });
+
+  return { status: "success", meta, manifest };
+}
+
+/**
+ * Sync from direct API (fallback)
+ */
+async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
+  const datasets = {};
+  const fetchTimes = {};
+  let totalProgress = 0;
+  const fetchTasks = [
+    ...ENDPOINTS.map((endpoint) => ({ type: "dataset", endpoint })),
+    ...LOOKUP_CONFIG.map((lookup) => ({ type: "lookup", ...lookup })),
+  ];
+  const progressPerTask = 70 / fetchTasks.length;
+
+  try {
     for (const task of fetchTasks) {
       const taskStart = Date.now();
       const progressStep =
@@ -117,9 +298,7 @@ export async function syncBvlData(storage, options = {}) {
           status: error.status,
           attempt: error.attempt,
         });
-        throw new Error(
-          `Fehler beim Laden von ${identifier}: ${error.message}`
-        );
+        throw new Error(`Fehler beim Laden von ${identifier}: ${error.message}`);
       }
     }
 
@@ -231,31 +410,7 @@ export async function syncBvlData(storage, options = {}) {
     return { status: "success", meta };
   } catch (error) {
     const errorMessage = error.message || "Unbekannter Fehler";
-    log("error", "Sync failed", { error: errorMessage, stack: error.stack });
-
-    const meta = {
-      lastError: errorMessage,
-      lastErrorTime: new Date().toISOString(),
-    };
-
-    try {
-      await storage.setBvlMeta("lastError", errorMessage);
-      await storage.appendBvlSyncLog({
-        synced_at: new Date().toISOString(),
-        ok: 0,
-        message: errorMessage,
-        payload_hash: null,
-      });
-    } catch (e) {
-      log("error", "Failed to write error state", { error: e.message });
-    }
-
-    onProgress({
-      step: "error",
-      percent: 0,
-      message: `Fehler: ${errorMessage}`,
-    });
-
+    log("error", "API sync failed", { error: errorMessage, stack: error.stack });
     throw error;
   }
 }

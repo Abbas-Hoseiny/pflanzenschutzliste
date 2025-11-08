@@ -7,8 +7,36 @@ Statische Web-Anwendung zur Verwaltung, Berechnung und Dokumentation von Pflanze
 - Moderne Single-Page-App (ES-Module, kein Build-Step nötig)
 - Persistent gespeicherte Berechnungen, History und Stammdaten
 - SQLite-WASM mit OPFS-Unterstützung, Fallback auf JSON-Dateien oder LocalStorage
+- **BVL-Zulassungsdaten**: Automatischer Sync aus vorbereiteter SQLite-Datenbank via [pflanzenschutz-db](https://github.com/Abbas-Hoseiny/pflanzenschutz-db)
 - Sofortdruck (PDF) und Export/Import von Datenbank-Dateien
 - Nutzerfreundliche Features wie `beforeunload`-Hinweis bei aktiver Datenbankverbindung
+
+## Datenversorgung
+
+Die Anwendung bezieht BVL-Zulassungsdaten aus dem externen Repository [pflanzenschutz-db](https://github.com/Abbas-Hoseiny/pflanzenschutz-db), das per ETL-Pipeline eine komplette SQLite-Datenbank erzeugt und über GitHub Pages bereitstellt.
+
+### Manifest-basierte Synchronisation
+
+Statt zur Laufzeit die BVL-API direkt abzufragen, lädt die App ein `manifest.json` von `https://abbas-hoseiny.github.io/pflanzenschutz-db/`, prüft die Version und lädt bei Bedarf die vorbereitete SQLite-Datei herunter. Dies bietet mehrere Vorteile:
+
+- **Schnellerer Sync**: Eine einzelne Datei statt 40+ API-Aufrufe
+- **Offline-fähig**: Daten können lokal vorgehalten werden
+- **Erweiterte Daten**: Zusätzliche Informationen wie Wirkstoffe, Gefahrenhinweise, Hersteller etc.
+- **Konsistenz**: Alle Clients nutzen denselben Datenstand
+
+### Manifest-URL anpassen
+
+Für Tests oder alternative Datenquellen kann die Manifest-URL in der Browser-Konsole geändert werden:
+
+```javascript
+// Eigene Manifest-URL setzen
+localStorage.setItem('bvlManifestUrl', 'https://example.com/my-manifest.json');
+
+// Zurück zur Standard-URL
+localStorage.removeItem('bvlManifestUrl');
+```
+
+Nach dem Ändern der URL einmal die Seite neu laden und dann "Daten aktualisieren" klicken.
 
 ## Projektstruktur
 

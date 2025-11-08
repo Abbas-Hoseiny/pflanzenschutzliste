@@ -333,6 +333,16 @@ export async function importBvlDataset(payload, meta) {
 }
 
 /**
+ * Import BVL SQLite database
+ */
+export async function importBvlSqlite(data, manifest) {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('importBvlSqlite', { data, manifest });
+}
+
+/**
  * Get BVL meta value
  */
 export async function getBvlMeta(key) {

@@ -249,11 +249,15 @@ async function loadInitialData() {
 
     const lastSync = await storage.getBvlMeta("lastSyncIso");
     const lastSyncCounts = await storage.getBvlMeta("lastSyncCounts");
+    const dataSource = await storage.getBvlMeta("dataSource");
+    const apiStand = await storage.getBvlMeta("apiStand");
 
     services.state.updateSlice("zulassung", (prev) => ({
       ...prev,
       lastSync: lastSync || null,
       lastResultCounts: lastSyncCounts ? JSON.parse(lastSyncCounts) : null,
+      dataSource: dataSource || null,
+      apiStand: apiStand || null,
     }));
 
     const cultures = await storage.listBvlCultures();
@@ -309,16 +313,24 @@ function renderStatusSection(zulassung) {
 
   const lastSyncDate = new Date(zulassung.lastSync).toLocaleString("de-DE");
   const counts = zulassung.lastResultCounts || {};
+  const dataSource = zulassung.dataSource || "BVL API";
+  const apiStand = zulassung.apiStand || null;
 
   return `
     <div class="alert alert-success mb-3">
-      <strong>Letzte Synchronisation:</strong> ${lastSyncDate}<br>
-      <small>
-        Mittel: ${counts.mittel || 0}, 
-        Anwendungen: ${counts.awg || 0}, 
-        Kulturen: ${counts.awg_kultur || 0}, 
-        Schadorganismen: ${counts.awg_schadorg || 0}
-      </small>
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <strong>Letzte Synchronisation:</strong> ${lastSyncDate}<br>
+          <strong>Datenquelle:</strong> ${escapeHtml(dataSource)}<br>
+          ${apiStand ? `<strong>API-Stand:</strong> ${escapeHtml(apiStand)}<br>` : ""}
+          <small class="mt-1 d-block">
+            Mittel: ${counts.mittel || counts.bvl_mittel || 0}, 
+            Anwendungen: ${counts.awg || counts.bvl_awg || 0}, 
+            Kulturen: ${counts.awg_kultur || counts.bvl_awg_kultur || 0}, 
+            Schadorganismen: ${counts.awg_schadorg || counts.bvl_awg_schadorg || 0}
+          </small>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -518,7 +530,79 @@ function renderResultItem(result) {
         )}</span>`
       : ""
   }
+  ${
+    result.extras && result.extras.is_bio
+      ? '<span class="badge bg-success">Bio/Öko</span>'
+      : ""
+  }
       </p>
+      
+      ${
+        result.wirkstoffe && result.wirkstoffe.length > 0
+          ? `
+        <div class="mt-2">
+          <strong>Wirkstoffe:</strong>
+          <ul class="small mb-0">
+            ${result.wirkstoffe
+              .map(
+                (w) => `
+              <li>
+                ${escapeHtml(w.wirkstoff_name || w.wirkstoff || "-")}
+                ${w.gehalt ? ` - ${escapeHtml(String(w.gehalt))} ${escapeHtml(w.einheit || "")}` : ""}
+              </li>
+            `
+              )
+              .join("")}
+          </ul>
+        </div>
+      `
+          : ""
+      }
+      
+      ${
+        result.vertrieb && result.vertrieb.length > 0
+          ? `
+        <div class="mt-2">
+          <strong>Hersteller/Vertrieb:</strong>
+          ${result.vertrieb
+            .map(
+              (v) => `
+            <div class="small">
+              ${escapeHtml(v.hersteller_name || v.firma || "-")}
+              ${
+                v.website
+                  ? ` - <a href="${escapeHtml(v.website)}" target="_blank" rel="noopener">Website</a>`
+                  : ""
+              }
+            </div>
+          `
+            )
+            .join("")}
+        </div>
+      `
+          : ""
+      }
+      
+      ${
+        result.gefahrhinweise && result.gefahrhinweise.length > 0
+          ? `
+        <div class="mt-2">
+          <strong>Gefahrenhinweise:</strong>
+          <div class="d-flex flex-wrap gap-1">
+            ${result.gefahrhinweise
+              .map(
+                (g) => `
+              <span class="badge bg-danger" title="${escapeHtml(g.hinweis_text || "")}">
+                ${escapeHtml(g.hinweis_kode || g.h_code || "")}
+              </span>
+            `
+              )
+              .join("")}
+          </div>
+        </div>
+      `
+          : ""
+      }
       
       ${
         result.kulturen && result.kulturen.length > 0
