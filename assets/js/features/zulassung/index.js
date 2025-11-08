@@ -30,6 +30,7 @@ export function initZulassung(regionEl, serviceRefs) {
   // Load lookups when database is connected
   services.events.subscribe('database:connected', async () => {
     await loadLookups();
+    await loadLastSync();
   });
 }
 
@@ -47,6 +48,9 @@ function render() {
     container.innerHTML = '<div class="alert alert-info">Bitte verbinden Sie zuerst eine Datenbank.</div>';
     return;
   }
+  
+  // Check if SQLite is supported
+  const isSqliteSupported = sqliteDriver.isSupported();
   
   const { filters, results, busy, error, lastSync, lookups } = state.zulassung;
   
@@ -108,10 +112,12 @@ function render() {
               Suchen
             </button>
             
-            <button class="btn btn-outline-secondary" id="btn-update" ${busy ? 'disabled' : ''}>
+            <button class="btn btn-outline-secondary" id="btn-update" ${busy || !isSqliteSupported ? 'disabled' : ''}>
               ${busy ? '<span class="spinner-border spinner-border-sm me-1"></span>' : ''}
               Daten aktualisieren
             </button>
+            
+            ${!isSqliteSupported ? '<span class="text-warning ms-2 small">Online-Update erfordert SQLite-WASM Unterstützung</span>' : ''}
             
             ${lastSync ? `<span class="text-muted ms-auto align-self-center small">
               Letzte Aktualisierung: ${new Date(lastSync).toLocaleString('de-DE')}
@@ -287,6 +293,11 @@ async function handleUpdate() {
   }));
   
   try {
+    // Check if online
+    if (!navigator.onLine) {
+      throw new Error('Keine Internetverbindung verfügbar');
+    }
+    
     const result = await syncBvlData({
       sqliteDriver,
       onProgress: (endpoint, current, total) => {
@@ -323,9 +334,20 @@ async function handleUpdate() {
       throw new Error(result.error || 'Unbekannter Fehler');
     }
   } catch (err) {
+    let errorMessage = err.message;
+    
+    // Differentiate error types
+    if (err.message.includes('timeout') || err.message.includes('Timeout')) {
+      errorMessage = 'Zeitüberschreitung: Die Anfrage hat zu lange gedauert. Bitte versuchen Sie es später erneut.';
+    } else if (err.message.includes('Network') || err.message.includes('Failed to fetch')) {
+      errorMessage = 'Netzwerkfehler: Bitte überprüfen Sie Ihre Internetverbindung.';
+    } else if (err.message.includes('HTTP')) {
+      errorMessage = `API-Fehler: ${err.message}`;
+    }
+    
     services.state.updateSlice('zulassung', z => ({
       ...z,
-      error: `Aktualisierung fehlgeschlagen: ${err.message}`,
+      error: `Aktualisierung fehlgeschlagen: ${errorMessage}`,
       busy: false
     }));
   }
@@ -344,5 +366,20 @@ async function loadLookups() {
     }));
   } catch (err) {
     console.error('Failed to load lookups:', err);
+  }
+}
+
+async function loadLastSync() {
+  try {
+    const lastSync = await sqliteDriver.getBvlMeta('lastSyncIso');
+    
+    if (lastSync) {
+      services.state.updateSlice('zulassung', z => ({
+        ...z,
+        lastSync
+      }));
+    }
+  } catch (err) {
+    console.error('Failed to load lastSync:', err);
   }
 }
