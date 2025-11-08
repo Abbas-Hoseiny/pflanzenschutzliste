@@ -2,7 +2,8 @@ const SECTION_MAP = [
   { id: 'calc', label: 'Berechnung' },
   { id: 'history', label: 'Historie' },
   { id: 'settings', label: 'Einstellungen' },
-  { id: 'report', label: 'Auswertung' }
+  { id: 'report', label: 'Auswertung' },
+  { id: 'zulassung', label: 'Zulassung' }
 ];
 
 let initialized = false;

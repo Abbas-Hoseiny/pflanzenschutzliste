@@ -36,6 +36,14 @@ let state = {
   calcContext: null,
   ui: {
     notifications: []
+  },
+  zulassung: {
+    filters: { culture: null, pest: null, text: '', includeExpired: false },
+    results: [],
+    busy: false,
+    error: null,
+    lastSync: null,
+    lookups: { cultures: [], pests: [] }
   }
 };
 
@@ -113,6 +121,14 @@ export function resetState(newState = undefined) {
     calcContext: null,
     ui: {
       notifications: []
+    },
+    zulassung: {
+      filters: { culture: null, pest: null, text: '', includeExpired: false },
+      results: [],
+      busy: false,
+      error: null,
+      lastSync: null,
+      lookups: { cultures: [], pests: [] }
     }
   };
   const prevState = state;

@@ -55,6 +55,27 @@ self.onmessage = async function(event) {
       case 'importDB':
         result = await importDB(payload);
         break;
+      case 'importBvlDataset':
+        result = await importBvlDataset(payload);
+        break;
+      case 'getBvlMeta':
+        result = await getBvlMeta(payload);
+        break;
+      case 'setBvlMeta':
+        result = await setBvlMeta(payload);
+        break;
+      case 'appendBvlSyncLog':
+        result = await appendBvlSyncLog(payload);
+        break;
+      case 'queryZulassung':
+        result = await queryZulassung(payload);
+        break;
+      case 'listBvlCultures':
+        result = await listBvlCultures();
+        break;
+      case 'listBvlSchadorg':
+        result = await listBvlSchadorg();
+        break;
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -199,8 +220,104 @@ async function applySchema() {
     db.exec(schemaSql);
   }
   
-  // Future migrations can be added here
-  // if (currentVersion < 2) { ... }
+  // Migration to version 2: Add BVL tables
+  if (currentVersion < 2) {
+    // Drop any existing bvl_* tables from incomplete migrations
+    db.exec(`
+      DROP TABLE IF EXISTS bvl_sync_log;
+      DROP TABLE IF EXISTS bvl_awg_wartezeit;
+      DROP TABLE IF EXISTS bvl_awg_aufwand;
+      DROP TABLE IF EXISTS bvl_awg_schadorg;
+      DROP TABLE IF EXISTS bvl_awg_kultur;
+      DROP TABLE IF EXISTS bvl_awg;
+      DROP TABLE IF EXISTS bvl_mittel;
+      DROP TABLE IF EXISTS bvl_meta;
+    `);
+    
+    // Create BVL schema
+    const bvlSchemaSql = `
+      CREATE TABLE bvl_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+      
+      CREATE TABLE bvl_mittel (
+        kennr TEXT PRIMARY KEY,
+        name TEXT,
+        formulierung TEXT,
+        zul_erstmalig TEXT,
+        zul_ende TEXT,
+        geringes_risiko INTEGER,
+        payload_json TEXT
+      );
+      
+      CREATE TABLE bvl_awg (
+        awg_id TEXT PRIMARY KEY,
+        kennr TEXT REFERENCES bvl_mittel(kennr) ON DELETE CASCADE,
+        status_json TEXT,
+        zulassungsende TEXT
+      );
+      
+      CREATE TABLE bvl_awg_kultur (
+        awg_id TEXT REFERENCES bvl_awg(awg_id) ON DELETE CASCADE,
+        kultur TEXT,
+        ausgenommen INTEGER,
+        sortier_nr INTEGER,
+        PRIMARY KEY (awg_id, kultur, ausgenommen)
+      );
+      
+      CREATE TABLE bvl_awg_schadorg (
+        awg_id TEXT REFERENCES bvl_awg(awg_id) ON DELETE CASCADE,
+        schadorg TEXT,
+        ausgenommen INTEGER,
+        sortier_nr INTEGER,
+        PRIMARY KEY (awg_id, schadorg, ausgenommen)
+      );
+      
+      CREATE TABLE bvl_awg_aufwand (
+        awg_id TEXT REFERENCES bvl_awg(awg_id) ON DELETE CASCADE,
+        aufwand_bedingung TEXT,
+        sortier_nr INTEGER,
+        mittel_menge REAL,
+        mittel_einheit TEXT,
+        wasser_menge REAL,
+        wasser_einheit TEXT,
+        payload_json TEXT,
+        PRIMARY KEY (awg_id, aufwand_bedingung, sortier_nr)
+      );
+      
+      CREATE TABLE bvl_awg_wartezeit (
+        awg_wartezeit_nr INTEGER,
+        awg_id TEXT REFERENCES bvl_awg(awg_id) ON DELETE CASCADE,
+        kultur TEXT,
+        sortier_nr INTEGER,
+        tage INTEGER,
+        bemerkung_kode TEXT,
+        anwendungsbereich TEXT,
+        erlaeuterung TEXT,
+        payload_json TEXT,
+        PRIMARY KEY (awg_wartezeit_nr, awg_id)
+      );
+      
+      CREATE TABLE bvl_sync_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        synced_at TEXT,
+        ok INTEGER,
+        message TEXT,
+        payload_hash TEXT
+      );
+      
+      CREATE INDEX idx_awg_kennr ON bvl_awg(kennr);
+      CREATE INDEX idx_awg_kultur_kultur ON bvl_awg_kultur(kultur);
+      CREATE INDEX idx_awg_schadorg_schadorg ON bvl_awg_schadorg(schadorg);
+      CREATE INDEX idx_awg_aufwand_awg ON bvl_awg_aufwand(awg_id);
+      CREATE INDEX idx_awg_wartezeit_awg ON bvl_awg_wartezeit(awg_id);
+      
+      PRAGMA user_version = 2;
+    `;
+    
+    db.exec(bvlSchemaSql);
+  }
 }
 
 /**
@@ -654,4 +771,345 @@ async function importDB(data) {
   currentMode = 'memory';
   isInitialized = true;
   return { success: true, mode: 'memory' };
+}
+
+/**
+ * Import BVL dataset into database
+ * Replaces all BVL data with new dataset in a transaction
+ */
+async function importBvlDataset(dataset) {
+  if (!db) throw new Error('Database not initialized');
+  
+  db.exec('BEGIN TRANSACTION');
+  
+  try {
+    // Clear existing BVL data
+    db.exec(`
+      DELETE FROM bvl_awg_wartezeit;
+      DELETE FROM bvl_awg_aufwand;
+      DELETE FROM bvl_awg_schadorg;
+      DELETE FROM bvl_awg_kultur;
+      DELETE FROM bvl_awg;
+      DELETE FROM bvl_mittel;
+    `);
+    
+    // Insert mittel
+    if (dataset.mittel && dataset.mittel.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO bvl_mittel (kennr, name, formulierung, zul_erstmalig, zul_ende, geringes_risiko, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const item of dataset.mittel) {
+        stmt.bind([
+          item.kennr,
+          item.name,
+          item.formulierung,
+          item.zul_erstmalig,
+          item.zul_ende,
+          item.geringes_risiko,
+          item.payload_json
+        ]).step();
+        stmt.reset();
+      }
+      stmt.finalize();
+    }
+    
+    // Insert awg
+    if (dataset.awg && dataset.awg.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO bvl_awg (awg_id, kennr, status_json, zulassungsende)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const item of dataset.awg) {
+        stmt.bind([
+          item.awg_id,
+          item.kennr,
+          item.status_json,
+          item.zulassungsende
+        ]).step();
+        stmt.reset();
+      }
+      stmt.finalize();
+    }
+    
+    // Insert awg_kultur
+    if (dataset.awg_kultur && dataset.awg_kultur.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO bvl_awg_kultur (awg_id, kultur, ausgenommen, sortier_nr)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const item of dataset.awg_kultur) {
+        stmt.bind([
+          item.awg_id,
+          item.kultur,
+          item.ausgenommen,
+          item.sortier_nr
+        ]).step();
+        stmt.reset();
+      }
+      stmt.finalize();
+    }
+    
+    // Insert awg_schadorg
+    if (dataset.awg_schadorg && dataset.awg_schadorg.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO bvl_awg_schadorg (awg_id, schadorg, ausgenommen, sortier_nr)
+        VALUES (?, ?, ?, ?)
+      `);
+      for (const item of dataset.awg_schadorg) {
+        stmt.bind([
+          item.awg_id,
+          item.schadorg,
+          item.ausgenommen,
+          item.sortier_nr
+        ]).step();
+        stmt.reset();
+      }
+      stmt.finalize();
+    }
+    
+    // Insert awg_aufwand
+    if (dataset.awg_aufwand && dataset.awg_aufwand.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO bvl_awg_aufwand (awg_id, aufwand_bedingung, sortier_nr, mittel_menge, mittel_einheit, wasser_menge, wasser_einheit, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const item of dataset.awg_aufwand) {
+        stmt.bind([
+          item.awg_id,
+          item.aufwand_bedingung,
+          item.sortier_nr,
+          item.mittel_menge,
+          item.mittel_einheit,
+          item.wasser_menge,
+          item.wasser_einheit,
+          item.payload_json
+        ]).step();
+        stmt.reset();
+      }
+      stmt.finalize();
+    }
+    
+    // Insert awg_wartezeit
+    if (dataset.awg_wartezeit && dataset.awg_wartezeit.length > 0) {
+      const stmt = db.prepare(`
+        INSERT INTO bvl_awg_wartezeit (awg_wartezeit_nr, awg_id, kultur, sortier_nr, tage, bemerkung_kode, anwendungsbereich, erlaeuterung, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const item of dataset.awg_wartezeit) {
+        stmt.bind([
+          item.awg_wartezeit_nr,
+          item.awg_id,
+          item.kultur,
+          item.sortier_nr,
+          item.tage,
+          item.bemerkung_kode,
+          item.anwendungsbereich,
+          item.erlaeuterung,
+          item.payload_json
+        ]).step();
+        stmt.reset();
+      }
+      stmt.finalize();
+    }
+    
+    db.exec('COMMIT');
+    return { success: true };
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+/**
+ * Get BVL metadata value
+ */
+async function getBvlMeta(key) {
+  if (!db) throw new Error('Database not initialized');
+  
+  const stmt = db.prepare('SELECT value FROM bvl_meta WHERE key = ?');
+  stmt.bind([key]);
+  
+  let value = null;
+  if (stmt.step()) {
+    value = stmt.get(0);
+  }
+  
+  stmt.finalize();
+  return value;
+}
+
+/**
+ * Set BVL metadata value
+ */
+async function setBvlMeta(payload) {
+  if (!db) throw new Error('Database not initialized');
+  
+  const { key, value } = payload;
+  
+  const stmt = db.prepare('INSERT OR REPLACE INTO bvl_meta (key, value) VALUES (?, ?)');
+  stmt.bind([key, value]).step();
+  stmt.finalize();
+  
+  return { success: true };
+}
+
+/**
+ * Append entry to BVL sync log
+ */
+async function appendBvlSyncLog(entry) {
+  if (!db) throw new Error('Database not initialized');
+  
+  const stmt = db.prepare(`
+    INSERT INTO bvl_sync_log (synced_at, ok, message, payload_hash)
+    VALUES (?, ?, ?, ?)
+  `);
+  
+  stmt.bind([
+    entry.synced_at,
+    entry.ok,
+    entry.message,
+    entry.payload_hash
+  ]).step();
+  
+  stmt.finalize();
+  return { success: true };
+}
+
+/**
+ * Query Zulassung data with filters
+ */
+async function queryZulassung(params) {
+  if (!db) throw new Error('Database not initialized');
+  
+  const { culture, pest, text, includeExpired } = params;
+  
+  let sql = `
+    SELECT DISTINCT
+      m.kennr,
+      m.name,
+      m.formulierung,
+      m.zul_ende,
+      a.awg_id,
+      a.status_json,
+      a.zulassungsende
+    FROM bvl_mittel m
+    INNER JOIN bvl_awg a ON a.kennr = m.kennr
+  `;
+  
+  const conditions = [];
+  const bindings = [];
+  
+  if (culture) {
+    sql += `
+      INNER JOIN bvl_awg_kultur k ON k.awg_id = a.awg_id
+    `;
+    conditions.push('k.kultur = ?');
+    bindings.push(culture);
+  }
+  
+  if (pest) {
+    sql += `
+      INNER JOIN bvl_awg_schadorg s ON s.awg_id = a.awg_id
+    `;
+    conditions.push('s.schadorg = ?');
+    bindings.push(pest);
+  }
+  
+  if (!includeExpired) {
+    conditions.push('(a.zulassungsende IS NULL OR a.zulassungsende >= date("now"))');
+  }
+  
+  if (text) {
+    conditions.push('(m.name LIKE ? OR m.kennr LIKE ?)');
+    const searchText = `%${text}%`;
+    bindings.push(searchText, searchText);
+  }
+  
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+  
+  sql += ' ORDER BY m.name LIMIT 100';
+  
+  const stmt = db.prepare(sql);
+  stmt.bind(bindings);
+  
+  const results = [];
+  while (stmt.step()) {
+    const row = stmt.get({});
+    
+    // Get aufwand for this awg_id
+    const aufwandStmt = db.prepare(`
+      SELECT * FROM bvl_awg_aufwand WHERE awg_id = ? ORDER BY sortier_nr
+    `);
+    aufwandStmt.bind([row.awg_id]);
+    const aufwand = [];
+    while (aufwandStmt.step()) {
+      aufwand.push(aufwandStmt.get({}));
+    }
+    aufwandStmt.finalize();
+    
+    // Get wartezeit for this awg_id
+    const wartezeitStmt = db.prepare(`
+      SELECT * FROM bvl_awg_wartezeit WHERE awg_id = ? ORDER BY sortier_nr
+    `);
+    wartezeitStmt.bind([row.awg_id]);
+    const wartezeit = [];
+    while (wartezeitStmt.step()) {
+      wartezeit.push(wartezeitStmt.get({}));
+    }
+    wartezeitStmt.finalize();
+    
+    results.push({
+      ...row,
+      aufwand,
+      wartezeit
+    });
+  }
+  
+  stmt.finalize();
+  return results;
+}
+
+/**
+ * List all BVL cultures (distinct, not ausgenommen)
+ */
+async function listBvlCultures() {
+  if (!db) throw new Error('Database not initialized');
+  
+  const stmt = db.prepare(`
+    SELECT DISTINCT kultur FROM bvl_awg_kultur
+    WHERE ausgenommen = 0
+    ORDER BY kultur
+  `);
+  
+  const cultures = [];
+  while (stmt.step()) {
+    cultures.push(stmt.get(0));
+  }
+  
+  stmt.finalize();
+  return cultures;
+}
+
+/**
+ * List all BVL Schadorganismen (distinct, not ausgenommen)
+ */
+async function listBvlSchadorg() {
+  if (!db) throw new Error('Database not initialized');
+  
+  const stmt = db.prepare(`
+    SELECT DISTINCT schadorg FROM bvl_awg_schadorg
+    WHERE ausgenommen = 0
+    ORDER BY schadorg
+  `);
+  
+  const pests = [];
+  while (stmt.step()) {
+    pests.push(stmt.get(0));
+  }
+  
+  stmt.finalize();
+  return pests;
 }

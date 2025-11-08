@@ -317,3 +317,73 @@ export async function deleteMedium(id) {
   }
   return await callWorker('deleteMedium', id);
 }
+
+/**
+ * Import BVL dataset
+ */
+export async function importBvlDataset(dataset) {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('importBvlDataset', dataset);
+}
+
+/**
+ * Get BVL metadata
+ */
+export async function getBvlMeta(key) {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('getBvlMeta', key);
+}
+
+/**
+ * Set BVL metadata
+ */
+export async function setBvlMeta(key, value) {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('setBvlMeta', { key, value });
+}
+
+/**
+ * Append BVL sync log entry
+ */
+export async function appendBvlSyncLog(entry) {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('appendBvlSyncLog', entry);
+}
+
+/**
+ * Query Zulassung data
+ */
+export async function queryZulassung(params) {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('queryZulassung', params);
+}
+
+/**
+ * List BVL cultures
+ */
+export async function listBvlCultures() {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('listBvlCultures');
+}
+
+/**
+ * List BVL Schadorganismen
+ */
+export async function listBvlSchadorg() {
+  if (!worker) {
+    throw new Error('Database not initialized');
+  }
+  return await callWorker('listBvlSchadorg');
+}
