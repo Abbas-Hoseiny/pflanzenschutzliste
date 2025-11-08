@@ -7,6 +7,7 @@ Statische Web-Anwendung zur Verwaltung, Berechnung und Dokumentation von Pflanze
 - Moderne Single-Page-App (ES-Module, kein Build-Step nötig)
 - Persistent gespeicherte Berechnungen, History und Stammdaten
 - SQLite-WASM mit OPFS-Unterstützung, Fallback auf JSON-Dateien oder LocalStorage
+- **BVL Zulassungs-Datenbank** – Integration der offiziellen Pflanzenschutzmittel-Zulassungsdaten
 - Sofortdruck (PDF) und Export/Import von Datenbank-Dateien
 - Nutzerfreundliche Features wie `beforeunload`-Hinweis bei aktiver Datenbankverbindung
 
@@ -18,7 +19,45 @@ Statische Web-Anwendung zur Verwaltung, Berechnung und Dokumentation von Pflanze
 - `assets/js/main.js` – Einstiegspunkt, bootstrapped die App
 - `assets/js/core/` – State-Management, Events, Storage, SQLite-Worker, Konfiguration
 - `assets/js/core/storage/` – Treiber für SQLite-WASM, File System Access API, LocalStorage
-- `assets/js/features/` – Feature-Module (Startup, Shell, Calculation, History, Settings, Reporting, Starfield)
+- `assets/js/features/` – Feature-Module (Startup, Shell, Calculation, History, Zulassung, Settings, Reporting, Starfield)
+
+## BVL Zulassungs-Datenbank
+
+Die Anwendung integriert die offizielle BVL (Bundesamt für Verbraucherschutz und Lebensmittelsicherheit) API für Pflanzenschutzmittel-Zulassungen. Im Tab **"Zulassung"** können Nutzer:
+
+- Nach zugelassenen Pflanzenschutzmitteln suchen
+- Filter nach Kultur und Schadorganismus anwenden
+- Detailinformationen wie Aufwandmenge, Wartezeit und Zulassungsende abrufen
+- Daten manuell über den "Daten aktualisieren"-Button synchronisieren
+
+### Erstmalige Nutzung
+
+1. Öffnen Sie den Tab **"Zulassung"** nach dem Verbinden einer Datenbank
+2. Klicken Sie auf **"Daten aktualisieren"**, um die BVL-Daten zu laden
+3. Der Vorgang kann einige Minuten dauern (ca. 6 API-Endpunkte werden geladen)
+4. Nach dem Laden stehen die Suchfunktionen zur Verfügung
+
+### Aktualisierung
+
+- Die Daten werden lokal in der SQLite-Datenbank gespeichert
+- Ein erneutes Klicken auf "Daten aktualisieren" lädt nur neue Änderungen
+- Bei unverändertem Datenstand wird "Keine Aktualisierung erforderlich" angezeigt
+- Die letzte Aktualisierung wird im UI angezeigt
+
+### Datenquellen
+
+Die Daten stammen von der offiziellen BVL OpenAPI: `https://psm-api.bvl.bund.de/ords/psm/api-v1/`
+
+Folgende Endpunkte werden verwendet:
+- `mittel` – Stammdaten der Pflanzenschutzmittel
+- `awg` – Anwendungen (Mittel × Kultur × Schadorganismus)
+- `awg_kultur` – Kulturen zu Anwendungen
+- `awg_schadorg` – Schadorganismen zu Anwendungen
+- `awg_aufwand` – Aufwand- und Wassermengen
+- `awg_wartezeit` – Wartezeiten
+
+Weitere Details zur API finden sich in `API.md`.
+
 
 ## Storage-Treiber & Browser-Support
 
