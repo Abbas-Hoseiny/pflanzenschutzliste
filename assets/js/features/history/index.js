@@ -1,9 +1,25 @@
 import { getState } from '../../core/state.js';
 import { printHtml } from '../../core/print.js';
+import { saveDatabase, getActiveDriverKey } from '../../core/storage/index.js';
+import { getDatabaseSnapshot } from '../../core/database.js';
 import { buildMediumTableHTML, buildMediumSummaryLines } from '../shared/mediumTable.js';
 
 let initialized = false;
 const selectedIndexes = new Set();
+
+async function persistHistoryChanges() {
+  const driverKey = getActiveDriverKey();
+  if (!driverKey || driverKey === 'memory') {
+    return;
+  }
+  try {
+    const snapshot = getDatabaseSnapshot();
+    await saveDatabase(snapshot);
+  } catch (err) {
+    console.error('Fehler beim Persistieren der Historie', err);
+    alert('Historie konnte nicht dauerhaft gespeichert werden. Bitte erneut versuchen.');
+  }
+}
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -367,6 +383,9 @@ export function initHistory(container, services) {
       selectedIndexes.clear();
       updateSelectionUI(section);
       renderDetail(null, section, null, state.fieldLabels);
+      persistHistoryChanges().catch(err => {
+        console.error('Persist delete history error', err);
+      });
     }
   });
 

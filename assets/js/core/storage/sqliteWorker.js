@@ -6,6 +6,7 @@
 let sqlite3 = null;
 let db = null;
 let isInitialized = false;
+let currentMode = 'memory';
 
 // SQLite-WASM CDN URL
 const SQLITE_WASM_CDN = 'https://cdn.jsdelivr.net/npm/@sqlite.org/sqlite-wasm@3.46.1-build1/sqlite-wasm/jswasm/';
@@ -88,25 +89,12 @@ async function initDatabase(options = {}) {
     
     // Determine storage mode
     const mode = options.mode || detectMode();
+    db = createDatabaseInstance(mode);
+    currentMode = mode;
     
-    if (mode === 'opfs' && sqlite3.opfs) {
-      // Use OPFS for persistent storage
-      db = new sqlite3.oo1.OpfsDb('/pflanzenschutz.sqlite');
-    } else {
-      // In-memory database (fallback)
-      db = new sqlite3.oo1.DB();
-    }
+    configureDatabase();
     
-    // Configure database
-    db.exec(`
-      PRAGMA foreign_keys = ON;
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA temp_store = MEMORY;
-      PRAGMA cache_size = -20000;
-    `);
-    
-    // Apply schema
+    // Apply schema for freshly created databases
     await applySchema();
     
     isInitialized = true;
@@ -130,6 +118,26 @@ function detectMode() {
     return 'opfs';
   }
   return 'memory';
+}
+
+function createDatabaseInstance(mode = 'memory') {
+  if (mode === 'opfs' && sqlite3?.opfs) {
+    return new sqlite3.oo1.OpfsDb('/pflanzenschutz.sqlite');
+  }
+  return new sqlite3.oo1.DB();
+}
+
+function configureDatabase(targetDb = db) {
+  if (!targetDb) {
+    throw new Error('Database not initialized');
+  }
+  targetDb.exec(`
+    PRAGMA foreign_keys = ON;
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
+    PRAGMA temp_store = MEMORY;
+    PRAGMA cache_size = -20000;
+  `);
 }
 
 /**
@@ -276,25 +284,33 @@ async function importSnapshot(snapshot) {
       const itemsStmt = db.prepare(
         'INSERT INTO history_items (history_id, medium_id, payload_json) VALUES (?, ?, ?)'
       );
-      
+
       for (const entry of snapshot.history) {
-        const createdAt = entry.header?.createdAt || new Date().toISOString();
-        historyStmt.bind([createdAt, JSON.stringify(entry.header || {})]).step();
+        const header = entry.header ? { ...entry.header } : { ...entry };
+        delete header.items;
+        const createdAt = entry.savedAt
+          || header.savedAt
+          || header.createdAt
+          || new Date().toISOString();
+        if (!header.createdAt) {
+          header.createdAt = createdAt;
+        }
+
+        historyStmt.bind([createdAt, JSON.stringify(header)]).step();
         const historyId = db.selectValue('SELECT last_insert_rowid()');
         historyStmt.reset();
-        
-        if (entry.items && Array.isArray(entry.items)) {
-          for (const item of entry.items) {
-            itemsStmt.bind([
-              historyId,
-              item.mediumId || item.medium_id || '',
-              JSON.stringify(item)
-            ]).step();
-            itemsStmt.reset();
-          }
+
+        const items = entry.items && Array.isArray(entry.items) ? entry.items : [];
+        for (const item of items) {
+          itemsStmt.bind([
+            historyId,
+            item.mediumId || item.medium_id || '',
+            JSON.stringify(item)
+          ]).step();
+          itemsStmt.reset();
         }
       }
-      
+
       historyStmt.finalize();
       itemsStmt.finalize();
     }
@@ -378,7 +394,7 @@ async function exportSnapshot() {
     sql: 'SELECT id, created_at, header_json FROM history ORDER BY created_at DESC',
     callback: (row) => {
       historyMap.set(row[0], {
-        header: JSON.parse(row[2]),
+        header: JSON.parse(row[2] || '{}'),
         items: []
       });
     }
@@ -395,7 +411,10 @@ async function exportSnapshot() {
     }
   });
   
-  snapshot.history = Array.from(historyMap.values());
+  snapshot.history = Array.from(historyMap.values()).map(entry => ({
+    ...entry.header,
+    items: entry.items
+  }));
   
   return snapshot;
 }
@@ -469,9 +488,10 @@ async function listHistory({ page = 1, pageSize = 50 } = {}) {
     `,
     bind: [pageSize, offset],
     callback: (row) => {
+      const header = JSON.parse(row[2] || '{}');
       history.push({
         id: row[0],
-        header: JSON.parse(row[2])
+        ...header
       });
     }
   });
@@ -496,9 +516,10 @@ async function getHistoryEntry(id) {
     sql: 'SELECT id, created_at, header_json FROM history WHERE id = ?',
     bind: [id],
     callback: (row) => {
+      const header = JSON.parse(row[2] || '{}');
       entry = {
         id: row[0],
-        header: JSON.parse(row[2]),
+        ...header,
         items: []
       };
     }
@@ -525,17 +546,27 @@ async function appendHistoryEntry(entry) {
   db.exec('BEGIN TRANSACTION');
   
   try {
-    const createdAt = entry.header?.createdAt || new Date().toISOString();
+    const header = entry.header ? { ...entry.header } : { ...entry };
+    delete header.items;
+    const createdAt = entry.savedAt
+      || header.savedAt
+      || header.createdAt
+      || new Date().toISOString();
+    if (!header.createdAt) {
+      header.createdAt = createdAt;
+    }
+
     const stmt = db.prepare('INSERT INTO history (created_at, header_json) VALUES (?, ?)');
-    stmt.bind([createdAt, JSON.stringify(entry.header || {})]).step();
+    stmt.bind([createdAt, JSON.stringify(header)]).step();
     const historyId = db.selectValue('SELECT last_insert_rowid()');
     stmt.finalize();
     
-    if (entry.items && Array.isArray(entry.items)) {
+    const items = entry.items && Array.isArray(entry.items) ? entry.items : [];
+    if (items.length) {
       const itemStmt = db.prepare(
         'INSERT INTO history_items (history_id, medium_id, payload_json) VALUES (?, ?, ?)'
       );
-      for (const item of entry.items) {
+      for (const item of items) {
         itemStmt.bind([
           historyId,
           item.mediumId || item.medium_id || '',
@@ -580,14 +611,47 @@ async function exportDB() {
  */
 async function importDB(data) {
   if (!db) throw new Error('Database not initialized');
-  
-  // Close current database
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+
+  if (currentMode === 'opfs' && sqlite3?.oo1?.OpfsDb && sqlite3?.opfs) {
+    // Import directly into OPFS-backed database
+    db.close();
+    await sqlite3.oo1.OpfsDb.importDb('/pflanzenschutz.sqlite', bytes);
+  db = createDatabaseInstance('opfs');
+    configureDatabase();
+    currentMode = 'opfs';
+    isInitialized = true;
+    return { success: true, mode: 'opfs' };
+  }
+
+  // In-memory fallback using sqlite3_deserialize
   db.close();
-  
-  // Create new database from data
-  const uint8Array = new Uint8Array(data);
-  db = new sqlite3.oo1.DB();
-  sqlite3.capi.sqlite3_js_db_import(db.pointer, uint8Array);
-  
-  return { success: true };
+  const newDb = new sqlite3.oo1.DB();
+  const scope = sqlite3.wasm.scopedAllocPush();
+  try {
+    const pData = sqlite3.wasm.allocFromTypedArray(bytes);
+    const pSchema = sqlite3.wasm.allocCString('main');
+    const flags = (sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE || 0)
+      | (sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE || 0);
+    const rc = sqlite3.capi.sqlite3_deserialize(
+      newDb.pointer,
+      pSchema,
+      pData,
+      bytes.byteLength,
+      bytes.byteLength,
+      flags
+    );
+    if (rc !== sqlite3.capi.SQLITE_OK) {
+      newDb.close();
+      throw new Error(`sqlite3_deserialize failed: ${sqlite3.capi.sqlite3_js_rc_str(rc) || rc}`);
+    }
+  } finally {
+    sqlite3.wasm.scopedAllocPop(scope);
+  }
+
+  db = newDb;
+  configureDatabase();
+  currentMode = 'memory';
+  isInitialized = true;
+  return { success: true, mode: 'memory' };
 }

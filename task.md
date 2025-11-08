@@ -137,4 +137,4 @@ This document is a detailed execution plan for introducing a full SQLite-WASM st
 
 ---
 
-Mit diesem Plan kann ein Coding Agent die Migration schrittweise durchführen und nach jedem Milestone testen. Änderungen sollten in kleinen, reviewbaren Pull Requests umgesetzt werden (z. B. pro Abschnitt aus Kapitel 9).
+Mit diesem Plan kann ein Coding Agent die Migration schrittweise durchführen und nach jedem Milestone testen. Änderungen sollten in kleinen, reviewbaren Pull Requests umgesetzt werden (z. B. pro Abschnitt aus Kapitel 9).git 
