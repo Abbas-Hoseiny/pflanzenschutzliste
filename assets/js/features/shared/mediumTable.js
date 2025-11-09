@@ -1,3 +1,5 @@
+import { escapeHtml, formatNumber } from '../../core/utils.js';
+
 const COLUMN_FALLBACK_LABELS = {
   medium: 'Mittel',
   unit: 'Einheit',
@@ -26,23 +28,6 @@ const VARIANT_CONFIG = {
     missingValue: '-'
   }
 };
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function formatNumber(value, fractionDigits = 2, fallback = '-') {
-  const num = Number.parseFloat(value);
-  if (Number.isNaN(num)) {
-    return fallback;
-  }
-  return num.toFixed(fractionDigits);
-}
 
 function resolveVariant(variant) {
   return VARIANT_CONFIG[variant] || VARIANT_CONFIG.calculation;

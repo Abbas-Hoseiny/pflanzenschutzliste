@@ -325,3 +325,119 @@
     background-color: #fff;
   }
 }
+
+/* Virtual List Container */
+[data-role="history-list"],
+[data-role="report-list"] {
+  overflow: auto;
+  position: relative;
+  min-height: 400px;
+  max-height: 70vh;
+}
+
+/* Calculation Snapshot Cards */
+.calc-snapshot-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  position: relative;
+  contain: content;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.calc-snapshot-card:hover {
+  border-color: var(--color-accent);
+}
+
+.calc-snapshot-card--selected {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(47, 158, 68, 0.2);
+}
+
+.calc-snapshot-card__checkbox {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+}
+
+.calc-snapshot-card__header {
+  margin-bottom: 0.75rem;
+}
+
+.calc-snapshot-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.95rem;
+}
+
+.calc-snapshot-card__date,
+.calc-snapshot-card__creator {
+  flex: 0 0 auto;
+}
+
+.calc-snapshot-card__body {
+  margin-bottom: 0.75rem;
+}
+
+.calc-snapshot-card__info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.calc-snapshot-card__info-item {
+  flex: 0 0 auto;
+}
+
+.calc-snapshot-card__mediums {
+  margin-top: 0.5rem;
+}
+
+.calc-snapshot-card__mediums .calc-snapshot-table {
+  font-size: 0.85rem;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.calc-snapshot-card__mediums .calc-snapshot-table th,
+.calc-snapshot-card__mediums .calc-snapshot-table td {
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+}
+
+.calc-snapshot-card__mediums .calc-snapshot-table th {
+  background-color: var(--color-surface-alt);
+}
+
+.calc-snapshot-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* Print-specific card styles */
+@media print {
+  .calc-snapshot-print {
+    page-break-inside: avoid;
+    margin-bottom: 2rem;
+  }
+
+  .calc-snapshot-print__header h3 {
+    margin: 0 0 0.5rem;
+  }
+
+  .calc-snapshot-print__meta {
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .calc-snapshot-print__mediums table {
+    width: 100%;
+    font-size: 0.85rem;
+  }
+}
