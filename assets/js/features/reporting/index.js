@@ -1,10 +1,19 @@
 import { getState } from '../../core/state.js';
 import { printHtml } from '../../core/print.js';
 import { buildMediumSummaryLines } from '../shared/mediumTable.js';
+import { escapeHtml } from '../../core/utils.js';
+import { initVirtualList } from '../../core/virtualList.js';
+import { renderCalculationSnapshot } from '../shared/calculationSnapshot.js';
+import { printEntriesChunked } from '../shared/printing.js';
 
 let initialized = false;
 let currentEntries = [];
 let activeFilter = null;
+let virtualListInstance = null;
+
+// Feature flag for virtual scrolling
+const USE_VIRTUAL_SCROLLING = true;
+const INITIAL_LOAD_LIMIT = 200;
 
 function createSection() {
   const section = document.createElement('section');
@@ -36,35 +45,12 @@ function createSection() {
           <button class="btn btn-outline-light btn-sm" data-action="print-report" disabled>Drucken</button>
         </div>
         <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-dark table-bordered" id="report-table">
-              <thead>
-                <tr>
-                  <th>Datum</th>
-                  <th>Erstellt von</th>
-                  <th>Standort</th>
-                  <th>Kultur</th>
-                  <th>Kisten</th>
-                  <th>Mittel &amp; Gesamtmengen</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div data-role="report-list" class="report-list"></div>
         </div>
       </div>
     </div>
   `;
   return section;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function parseDate(value) {
@@ -91,41 +77,82 @@ function germanDateToIso(value) {
   return new Date(year, month - 1, day);
 }
 
+/**
+ * Render cards list with virtual scrolling support
+ */
+function renderCardsList(listContainer, entries, labels) {
+  const resolvedLabels = labels || getState().fieldLabels;
+
+  if (USE_VIRTUAL_SCROLLING && entries.length > INITIAL_LOAD_LIMIT) {
+    // Use virtual scrolling for large lists
+    if (!virtualListInstance) {
+      virtualListInstance = initVirtualList(listContainer, {
+        itemCount: entries.length,
+        estimatedItemHeight: 200,
+        overscan: 6,
+        renderItem: (node, index) => {
+          const entry = entries[index];
+          node.innerHTML = renderCalculationSnapshot(entry, resolvedLabels, {
+            showActions: false,
+            includeCheckbox: false
+          });
+        }
+      });
+    } else {
+      // Update existing virtual list
+      virtualListInstance.updateItemCount(entries.length);
+    }
+  } else {
+    // Regular rendering for smaller lists or fallback
+    // Destroy virtual list if it exists
+    if (virtualListInstance) {
+      virtualListInstance.destroy();
+      virtualListInstance = null;
+    }
+
+    // Render all or initial batch
+    const limit = Math.min(entries.length, INITIAL_LOAD_LIMIT);
+    const fragment = document.createDocumentFragment();
+    
+    for (let i = 0; i < limit; i++) {
+      const entry = entries[i];
+      const cardHtml = renderCalculationSnapshot(entry, resolvedLabels, {
+        showActions: false,
+        includeCheckbox: false
+      });
+      
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = cardHtml;
+      fragment.appendChild(wrapper.firstElementChild);
+    }
+
+    listContainer.innerHTML = '';
+    listContainer.appendChild(fragment);
+
+    // Add "Load More" button if needed
+    if (entries.length > limit) {
+      const loadMoreBtn = document.createElement('button');
+      loadMoreBtn.className = 'btn btn-secondary w-100 mt-3';
+      loadMoreBtn.textContent = `Mehr laden (${entries.length - limit} weitere)`;
+      loadMoreBtn.dataset.action = 'load-more';
+      loadMoreBtn.dataset.currentLimit = String(limit);
+      listContainer.appendChild(loadMoreBtn);
+    }
+  }
+}
+
 function renderTable(section, entries, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
-  const tbody = section.querySelector('#report-table tbody');
-  const thead = section.querySelector('#report-table thead');
-  tbody.innerHTML = '';
+  const listContainer = section.querySelector('[data-role="report-list"]');
   const info = section.querySelector('[data-role="report-info"]');
   const printButton = section.querySelector('[data-action="print-report"]');
+  
   currentEntries = entries.slice();
-  if (thead) {
-    const tableLabels = resolvedLabels.reporting.tableColumns;
-    thead.innerHTML = `
-      <tr>
-        <th>${escapeHtml(tableLabels.date)}</th>
-        <th>${escapeHtml(tableLabels.creator)}</th>
-        <th>${escapeHtml(tableLabels.location)}</th>
-        <th>${escapeHtml(tableLabels.crop)}</th>
-        <th>${escapeHtml(tableLabels.quantity)}</th>
-        <th>${escapeHtml(tableLabels.mediums)}</th>
-      </tr>
-    `;
+
+  if (listContainer) {
+    renderCardsList(listContainer, entries, resolvedLabels);
   }
-  entries.forEach(entry => {
-    const row = document.createElement('tr');
-    const mediumLines = buildMediumSummaryLines(entry.items, resolvedLabels);
-    const mediumsCell = mediumLines.length ? mediumLines.map(line => `<div>${line}</div>`).join('') : '-';
-    row.innerHTML = `
-      <td>${escapeHtml(entry.datum || entry.date || '')}</td>
-      <td>${escapeHtml(entry.ersteller || '')}</td>
-      <td>${escapeHtml(entry.standort || '')}</td>
-      <td>${escapeHtml(entry.kultur || '')}</td>
-      <td>${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}</td>
-      <td>${mediumsCell}</td>
-    `;
-    tbody.appendChild(row);
-  });
+
   if (info) {
     info.textContent = describeFilter(entries.length, resolvedLabels);
   }
@@ -212,6 +239,47 @@ export function initReporting(container, services) {
   });
 
   section.addEventListener('click', event => {
+    // Handle load more
+    if (event.target.dataset.action === 'load-more') {
+      const btn = event.target;
+      const currentLimit = parseInt(btn.dataset.currentLimit, 10);
+      const newLimit = Math.min(currentEntries.length, currentLimit + INITIAL_LOAD_LIMIT);
+      
+      const listContainer = section.querySelector('[data-role="report-list"]');
+      const resolvedLabels = getState().fieldLabels;
+      
+      // Render additional items
+      const fragment = document.createDocumentFragment();
+      for (let i = currentLimit; i < newLimit; i++) {
+        const entry = currentEntries[i];
+        const cardHtml = renderCalculationSnapshot(entry, resolvedLabels, {
+          showActions: false,
+          includeCheckbox: false
+        });
+        
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = cardHtml;
+        fragment.appendChild(wrapper.firstElementChild);
+      }
+      
+      // Remove the button and add new items
+      btn.remove();
+      listContainer.appendChild(fragment);
+      
+      // Add new button if more items remain
+      if (newLimit < currentEntries.length) {
+        const newBtn = document.createElement('button');
+        newBtn.className = 'btn btn-secondary w-100 mt-3';
+        newBtn.textContent = `Mehr laden (${currentEntries.length - newLimit} weitere)`;
+        newBtn.dataset.action = 'load-more';
+        newBtn.dataset.currentLimit = String(newLimit);
+        listContainer.appendChild(newBtn);
+      }
+      
+      return;
+    }
+    
+    // Handle print report
     const trigger = event.target.closest('[data-action="print-report"]');
     if (!trigger) {
       return;
@@ -225,29 +293,6 @@ export function initReporting(container, services) {
 
   initialized = true;
 }
-
-const REPORT_STYLES = `
-  .report-summary {
-    margin-top: 1.5rem;
-  }
-  .report-summary table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.95rem;
-  }
-  .report-summary th,
-  .report-summary td {
-    border: 1px solid #555;
-    padding: 6px 8px;
-    vertical-align: top;
-  }
-  .report-summary th {
-    background: #f2f2f2;
-  }
-  .report-summary td div + div {
-    margin-top: 0.25rem;
-  }
-`;
 
 function buildCompanyHeader(company = {}) {
   const hasContent = Boolean(
@@ -275,52 +320,19 @@ function buildFilterInfo(filter, labels) {
   return `<p>${prefix}: ${escapeHtml(filter.startLabel)} – ${escapeHtml(filter.endLabel)}</p>`;
 }
 
-function buildReportTable(entries, labels) {
-  const resolvedLabels = labels || getState().fieldLabels;
-  const tableLabels = resolvedLabels.reporting.tableColumns;
-  const rows = entries
-    .map(entry => {
-      const summaryLines = buildMediumSummaryLines(entry.items, resolvedLabels);
-      const mediumsCell = summaryLines.length ? summaryLines.join('<br />') : '-';
-      return `
-      <tr>
-        <td>${escapeHtml(entry.datum || entry.date || '')}</td>
-        <td>${escapeHtml(entry.ersteller || '')}</td>
-        <td>${escapeHtml(entry.standort || '')}</td>
-        <td>${escapeHtml(entry.kultur || '')}</td>
-        <td class="nowrap">${escapeHtml(entry.kisten != null ? String(entry.kisten) : '')}</td>
-        <td>${mediumsCell}</td>
-      </tr>
-      `;
-    })
-    .join('');
-  return `
-    <section class="report-summary">
-  <h2>${escapeHtml(resolvedLabels.reporting.printTitle)}</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>${escapeHtml(tableLabels.date)}</th>
-            <th>${escapeHtml(tableLabels.creator)}</th>
-            <th>${escapeHtml(tableLabels.location)}</th>
-            <th>${escapeHtml(tableLabels.crop)}</th>
-            <th>${escapeHtml(tableLabels.quantity)}</th>
-            <th>${escapeHtml(tableLabels.mediums)}</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </section>
-  `;
-}
-
-function printReport(entries, filter, labels) {
+async function printReport(entries, filter, labels) {
   const resolvedLabels = labels || getState().fieldLabels;
   const company = getState().company || {};
-  const content = `${buildCompanyHeader(company)}${buildFilterInfo(filter, resolvedLabels)}${buildReportTable(entries, resolvedLabels)}`;
-  printHtml({
-    title: resolvedLabels.reporting.printTitle,
-    styles: REPORT_STYLES,
-    content
-  });
+  const headerHtml = buildCompanyHeader(company) + buildFilterInfo(filter, resolvedLabels);
+  
+  try {
+    await printEntriesChunked(entries, resolvedLabels, {
+      title: resolvedLabels.reporting.printTitle,
+      headerHtml,
+      chunkSize: 50
+    });
+  } catch (err) {
+    console.error('Printing failed', err);
+    alert('Fehler beim Drucken. Bitte erneut versuchen.');
+  }
 }
