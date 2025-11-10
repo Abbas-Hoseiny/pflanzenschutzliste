@@ -244,6 +244,7 @@ async function applySchema() {
         PRAGMA foreign_keys = OFF;
   DROP TABLE IF EXISTS bvl_lookup_schadorg;
   DROP TABLE IF EXISTS bvl_lookup_kultur;
+  DROP TABLE IF EXISTS bvl_mittel_extras;
   DROP TABLE IF EXISTS bvl_awg_wartezeit;
   DROP TABLE IF EXISTS bvl_awg_aufwand;
   DROP TABLE IF EXISTS bvl_awg_schadorg;
@@ -269,6 +270,15 @@ async function applySchema() {
           zul_ende TEXT,
           geringes_risiko INTEGER,
           payload_json TEXT
+        );
+
+        CREATE TABLE bvl_mittel_extras (
+          kennr TEXT PRIMARY KEY,
+          is_bio INTEGER DEFAULT 0,
+          is_oeko INTEGER DEFAULT 0,
+          certification_body TEXT,
+          payload_json TEXT,
+          FOREIGN KEY (kennr) REFERENCES bvl_mittel(kennr) ON DELETE CASCADE
         );
         
         CREATE TABLE bvl_awg (
@@ -344,7 +354,6 @@ async function applySchema() {
         CREATE INDEX idx_awg_wartezeit_awg ON bvl_awg_wartezeit(awg_id);
         CREATE INDEX idx_lookup_kultur_label ON bvl_lookup_kultur(label);
         CREATE INDEX idx_lookup_schadorg_label ON bvl_lookup_schadorg(label);
-        
         PRAGMA foreign_keys = ON;
         PRAGMA user_version = 2;
       `);
@@ -356,6 +365,64 @@ async function applySchema() {
       console.error("Migration to version 2 failed:", error);
       throw error;
     }
+  }
+
+  if (currentVersion < 3) {
+    console.log("Migrating database to version 3...");
+
+    db.exec("BEGIN TRANSACTION");
+
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS bvl_mittel_extras (
+          kennr TEXT PRIMARY KEY,
+          is_bio INTEGER DEFAULT 0,
+          is_oeko INTEGER DEFAULT 0,
+          certification_body TEXT,
+          payload_json TEXT,
+          FOREIGN KEY (kennr) REFERENCES bvl_mittel(kennr) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mittel_extras_bio ON bvl_mittel_extras(is_bio);
+        CREATE INDEX IF NOT EXISTS idx_mittel_extras_oeko ON bvl_mittel_extras(is_oeko);
+      `);
+
+      db.exec("PRAGMA user_version = 3;");
+      db.exec("COMMIT");
+      console.log("Database migrated to version 3 successfully");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      console.error("Migration to version 3 failed:", error);
+      throw error;
+    }
+  }
+}
+
+function ensureBvlExtrasTable() {
+  if (!db) throw new Error("Database not initialized");
+
+  let exists = false;
+  db.exec({
+    sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
+    callback: () => {
+      exists = true;
+    },
+  });
+
+  if (!exists) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bvl_mittel_extras (
+        kennr TEXT PRIMARY KEY,
+        is_bio INTEGER DEFAULT 0,
+        is_oeko INTEGER DEFAULT 0,
+        certification_body TEXT,
+        payload_json TEXT,
+        FOREIGN KEY (kennr) REFERENCES bvl_mittel(kennr) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mittel_extras_bio ON bvl_mittel_extras(is_bio);
+      CREATE INDEX IF NOT EXISTS idx_mittel_extras_oeko ON bvl_mittel_extras(is_oeko);
+    `);
   }
 }
 
@@ -853,6 +920,7 @@ async function importBvlDataset(payload) {
 
   const {
     mittel,
+    mittelExtras,
     awg,
     awg_kultur,
     awg_schadorg,
@@ -862,6 +930,8 @@ async function importBvlDataset(payload) {
     pestsLookup,
   } = payload;
   const debug = payload.debug || false;
+
+  ensureBvlExtrasTable();
 
   db.exec("BEGIN TRANSACTION");
 
@@ -874,6 +944,7 @@ async function importBvlDataset(payload) {
       DELETE FROM bvl_awg_kultur;
       DELETE FROM bvl_awg;
       DELETE FROM bvl_mittel;
+      DELETE FROM bvl_mittel_extras;
       DELETE FROM bvl_lookup_kultur;
       DELETE FROM bvl_lookup_schadorg;
     `);
@@ -905,6 +976,32 @@ async function importBvlDataset(payload) {
       stmt.finalize();
       counts.mittel = mittel.length;
       if (debug) console.debug(`Imported ${mittel.length} mittel`);
+    }
+
+    if (mittelExtras && mittelExtras.length > 0) {
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO bvl_mittel_extras
+        (kennr, is_bio, is_oeko, certification_body, payload_json)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+
+      for (const item of mittelExtras) {
+        stmt
+          .bind([
+            item.kennr,
+            item.is_bio || 0,
+            item.is_oeko || 0,
+            item.certification_body || null,
+            item.payload_json || null,
+          ])
+          .step();
+        stmt.reset();
+      }
+      stmt.finalize();
+      counts.bvl_mittel_extras = mittelExtras.length;
+      if (debug) console.debug(`Imported ${mittelExtras.length} mittel extras`);
+    } else {
+      counts.bvl_mittel_extras = 0;
     }
 
     // Import awg
@@ -1079,7 +1176,7 @@ async function importBvlSqlite(payload) {
   if (!sqlite3) throw new Error("SQLite not initialized");
 
   const { data, manifest } = payload;
-  
+
   if (!data || !(data instanceof Uint8Array || data instanceof Array)) {
     throw new Error("Invalid data: expected Uint8Array or Array");
   }
@@ -1088,7 +1185,7 @@ async function importBvlSqlite(payload) {
 
   // Create a temporary in-memory database with the imported data
   const remoteDb = new sqlite3.oo1.DB();
-  
+
   // Deserialize the database
   const scope = sqlite3.wasm.scopedAllocPush();
   try {
@@ -1126,7 +1223,10 @@ async function importBvlSqlite(payload) {
     },
   });
 
-  console.log(`Found ${bvlTables.length} BVL tables in remote database:`, bvlTables);
+  console.log(
+    `Found ${bvlTables.length} BVL tables in remote database:`,
+    bvlTables
+  );
 
   // Begin transaction on main database
   db.exec("BEGIN TRANSACTION");
@@ -1175,7 +1275,9 @@ async function importBvlSqlite(payload) {
           console.log(`Creating table ${tableName}`);
           db.exec(createSql);
         } else {
-          console.warn(`Could not get CREATE statement for ${tableName}, skipping`);
+          console.warn(
+            `Could not get CREATE statement for ${tableName}, skipping`
+          );
           continue;
         }
       }
@@ -1194,9 +1296,11 @@ async function importBvlSqlite(payload) {
 
       // Find common columns
       const commonColumns = columns.filter((col) => mainColumns.includes(col));
-      
+
       if (commonColumns.length === 0) {
-        console.warn(`No common columns between remote and main ${tableName}, skipping`);
+        console.warn(
+          `No common columns between remote and main ${tableName}, skipping`
+        );
         continue;
       }
 
@@ -1204,11 +1308,11 @@ async function importBvlSqlite(payload) {
 
       // Attach remote database
       db.exec(`ATTACH DATABASE ':memory:' AS remote`);
-      
+
       // Copy the remote database into the attached database
       const remoteCopy = new sqlite3.oo1.DB(":memory:");
       const remoteExport = sqlite3.capi.sqlite3_js_db_export(remoteDb.pointer);
-      
+
       const scope2 = sqlite3.wasm.scopedAllocPush();
       try {
         const pData2 = sqlite3.wasm.allocFromTypedArray(remoteExport);
@@ -1283,12 +1387,17 @@ async function importBvlSqlite(payload) {
       );
       for (const [key, value] of Object.entries(metaUpdates)) {
         metaStmt
-          .bind([key, typeof value === "string" ? value : JSON.stringify(value)])
+          .bind([
+            key,
+            typeof value === "string" ? value : JSON.stringify(value),
+          ])
           .step();
         metaStmt.reset();
       }
       metaStmt.finalize();
     }
+
+    ensureBvlExtrasTable();
 
     // Verify database integrity
     const integrityResult = db.selectValue("PRAGMA integrity_check");
@@ -1403,9 +1512,11 @@ async function queryZulassung(payload) {
   if (bioOnly) {
     db.exec({
       sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-      callback: () => { extrasTableExists = true; },
+      callback: () => {
+        extrasTableExists = true;
+      },
     });
-    
+
     if (extrasTableExists) {
       sql += ` LEFT JOIN bvl_mittel_extras e ON m.kennr = e.kennr `;
       conditions.push("(e.is_bio = 1 OR e.is_oeko = 1)");
@@ -1590,7 +1701,9 @@ async function queryZulassung(payload) {
     let wirkstoffeTableExists = false;
     db.exec({
       sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_wirkstoffe'",
-      callback: () => { wirkstoffeTableExists = true; },
+      callback: () => {
+        wirkstoffeTableExists = true;
+      },
     });
     if (wirkstoffeTableExists) {
       db.exec({
@@ -1601,7 +1714,7 @@ async function queryZulassung(payload) {
           const wirkstoff = {};
           const colNames = db.exec({
             sql: "PRAGMA table_info(bvl_mittel_wirkstoffe)",
-            returnValue: "resultRows"
+            returnValue: "resultRows",
           });
           colNames.forEach((col, idx) => {
             wirkstoff[col[1]] = row[idx];
@@ -1616,7 +1729,9 @@ async function queryZulassung(payload) {
     let gefahrTableExists = false;
     db.exec({
       sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_gefahrhinweise'",
-      callback: () => { gefahrTableExists = true; },
+      callback: () => {
+        gefahrTableExists = true;
+      },
     });
     if (gefahrTableExists) {
       db.exec({
@@ -1626,7 +1741,7 @@ async function queryZulassung(payload) {
           const gefahr = {};
           const colNames = db.exec({
             sql: "PRAGMA table_info(bvl_mittel_gefahrhinweise)",
-            returnValue: "resultRows"
+            returnValue: "resultRows",
           });
           colNames.forEach((col, idx) => {
             gefahr[col[1]] = row[idx];
@@ -1641,7 +1756,9 @@ async function queryZulassung(payload) {
     let vertriebTableExists = false;
     db.exec({
       sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_vertrieb'",
-      callback: () => { vertriebTableExists = true; },
+      callback: () => {
+        vertriebTableExists = true;
+      },
     });
     if (vertriebTableExists) {
       db.exec({
@@ -1651,7 +1768,7 @@ async function queryZulassung(payload) {
           const vert = {};
           const colNames = db.exec({
             sql: "PRAGMA table_info(bvl_mittel_vertrieb)",
-            returnValue: "resultRows"
+            returnValue: "resultRows",
           });
           colNames.forEach((col, idx) => {
             vert[col[1]] = row[idx];
@@ -1668,7 +1785,9 @@ async function queryZulassung(payload) {
     let extrasTableExists = false;
     db.exec({
       sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-      callback: () => { extrasTableExists = true; },
+      callback: () => {
+        extrasTableExists = true;
+      },
     });
     if (extrasTableExists) {
       db.exec({
@@ -1678,7 +1797,7 @@ async function queryZulassung(payload) {
           result.extras = {};
           const colNames = db.exec({
             sql: "PRAGMA table_info(bvl_mittel_extras)",
-            returnValue: "resultRows"
+            returnValue: "resultRows",
           });
           colNames.forEach((col, idx) => {
             result.extras[col[1]] = row[idx];
@@ -1686,7 +1805,8 @@ async function queryZulassung(payload) {
           // Extract common bio fields
           if (result.extras.is_bio) result.is_bio = !!result.extras.is_bio;
           if (result.extras.is_oeko) result.is_oeko = !!result.extras.is_oeko;
-          if (result.extras.certification_body) result.certification_body = result.extras.certification_body;
+          if (result.extras.certification_body)
+            result.certification_body = result.extras.certification_body;
         },
       });
     }

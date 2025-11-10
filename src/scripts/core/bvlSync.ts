@@ -72,7 +72,12 @@ export async function syncBvlData(storage, options = {}) {
     // Try manifest-based sync first if enabled
     if (USE_MANIFEST_SYNC) {
       try {
-        return await syncFromManifest(storage, { onProgress, onLog, log, startTime });
+        return await syncFromManifest(storage, {
+          onProgress,
+          onLog,
+          log,
+          startTime,
+        });
       } catch (error) {
         log("warn", "Manifest-based sync failed, falling back to API sync", {
           error: error.message,
@@ -117,7 +122,10 @@ export async function syncBvlData(storage, options = {}) {
 /**
  * Sync from manifest-based database
  */
-async function syncFromManifest(storage, { onProgress, onLog, log, startTime }) {
+async function syncFromManifest(
+  storage,
+  { onProgress, onLog, log, startTime }
+) {
   onProgress({
     step: "manifest",
     percent: 5,
@@ -301,7 +309,9 @@ async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
           status: error.status,
           attempt: error.attempt,
         });
-        throw new Error(`Fehler beim Laden von ${identifier}: ${error.message}`);
+        throw new Error(
+          `Fehler beim Laden von ${identifier}: ${error.message}`
+        );
       }
     }
 
@@ -336,7 +346,12 @@ async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
         lastSyncIso: new Date().toISOString(),
         lastSyncCounts: Object.entries(transformed).reduce(
           (acc, [key, val]) => {
-            acc[key] = Array.isArray(val) ? val.length : 0;
+            const count = Array.isArray(val) ? val.length : 0;
+            if (key === "mittelExtras") {
+              acc.bvl_mittel_extras = count;
+            } else {
+              acc[key] = count;
+            }
             return acc;
           },
           {}
@@ -382,7 +397,12 @@ async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
       lastSyncHash: hashes.combined,
       lastSyncIso: new Date().toISOString(),
       lastSyncCounts: Object.entries(transformed).reduce((acc, [key, val]) => {
-        acc[key] = Array.isArray(val) ? val.length : 0;
+        const count = Array.isArray(val) ? val.length : 0;
+        if (key === "mittelExtras") {
+          acc.bvl_mittel_extras = count;
+        } else {
+          acc[key] = count;
+        }
         return acc;
       }, {}),
       lastError: null,
@@ -413,7 +433,10 @@ async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
     return { status: "success", meta };
   } catch (error) {
     const errorMessage = error.message || "Unbekannter Fehler";
-    log("error", "API sync failed", { error: errorMessage, stack: error.stack });
+    log("error", "API sync failed", {
+      error: errorMessage,
+      stack: error.stack,
+    });
     throw error;
   }
 }
@@ -466,9 +489,151 @@ function coalesceValue(...candidates) {
   return null;
 }
 
+const TRUE_FLAG_VALUES = new Set([
+  "j",
+  "ja",
+  "jn",
+  "y",
+  "yes",
+  "true",
+  "1",
+  "x",
+]);
+
+function normalizeKey(key) {
+  return String(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function toBooleanFlag(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (value === 0) {
+      return false;
+    }
+    if (value === 1) {
+      return true;
+    }
+    return false;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      return false;
+    }
+    const normalized = trimmed.toLowerCase();
+    if (TRUE_FLAG_VALUES.has(normalized)) {
+      return true;
+    }
+    if (normalized.startsWith("j")) {
+      const next = normalized.charAt(1);
+      if (
+        next === "" ||
+        next === "a" ||
+        next === "n" ||
+        next === " " ||
+        next === "(" ||
+        next === "/" ||
+        next === "-" ||
+        next === "."
+      ) {
+        return true;
+      }
+    }
+    const numeric = Number(normalized);
+    if (!Number.isNaN(numeric)) {
+      return numeric === 1;
+    }
+  }
+  return false;
+}
+
+const CERT_BODY_KEYS = new Set([
+  "zertifizierer",
+  "biozertifizierer",
+  "kontrollstelle",
+  "oekokontrollstelle",
+  "oekokontrollnr",
+  "oekozertifizierer",
+  "certificationbody",
+  "certificationauthority",
+  "certification",
+  "biozertifizierung",
+]);
+
+function extractBioMetadata(entry) {
+  const info = {
+    isBio: false,
+    isOeko: false,
+    certificationBody: null,
+    evidence: {},
+  };
+
+  if (!entry || typeof entry !== "object") {
+    return info;
+  }
+
+  const stack = [{ value: entry, path: [] }];
+
+  while (stack.length > 0) {
+    const { value, path } = stack.pop();
+    if (!value || typeof value !== "object") {
+      continue;
+    }
+
+    for (const [rawKey, rawVal] of Object.entries(value)) {
+      const key = normalizeKey(rawKey);
+      const nextPath = [...path, rawKey];
+
+      if (rawVal && typeof rawVal === "object") {
+        stack.push({ value: rawVal, path: nextPath });
+        continue;
+      }
+
+      if (
+        typeof rawVal !== "string" &&
+        typeof rawVal !== "number" &&
+        typeof rawVal !== "boolean"
+      ) {
+        continue;
+      }
+
+      if (!info.isBio && key.includes("bio") && toBooleanFlag(rawVal)) {
+        info.isBio = true;
+        info.evidence[nextPath.join(".")] = rawVal;
+      }
+
+      if (!info.isOeko && (key.includes("oeko") || key.includes("oek"))) {
+        if (toBooleanFlag(rawVal)) {
+          info.isOeko = true;
+          info.evidence[nextPath.join(".")] = rawVal;
+        }
+      }
+
+      if (
+        !info.certificationBody &&
+        CERT_BODY_KEYS.has(key) &&
+        typeof rawVal === "string"
+      ) {
+        const trimmed = rawVal.trim();
+        if (trimmed) {
+          info.certificationBody = trimmed;
+          info.evidence[nextPath.join(".")] = rawVal;
+        }
+      }
+    }
+  }
+
+  return info;
+}
+
 function transformBvlData(datasets) {
   const result = {
     mittel: [],
+    mittelExtras: [],
     awg: [],
     awg_kultur: [],
     awg_schadorg: [],
@@ -488,6 +653,30 @@ function transformBvlData(datasets) {
       geringes_risiko: item.geringes_risiko === "J" ? 1 : 0,
       payload_json: JSON.stringify(item),
     }));
+
+    for (const item of datasets.mittel) {
+      const kennr = item.kennr || "";
+      if (!kennr) {
+        continue;
+      }
+
+      const bioMeta = extractBioMetadata(item);
+      if (!bioMeta.isBio && !bioMeta.isOeko && !bioMeta.certificationBody) {
+        continue;
+      }
+
+      const payload = Object.keys(bioMeta.evidence).length
+        ? JSON.stringify(bioMeta.evidence)
+        : null;
+
+      result.mittelExtras.push({
+        kennr,
+        is_bio: bioMeta.isBio ? 1 : 0,
+        is_oeko: bioMeta.isOeko ? 1 : 0,
+        certification_body: bioMeta.certificationBody,
+        payload_json: payload,
+      });
+    }
   }
 
   if (datasets.awg) {

@@ -8,6 +8,7 @@ import { syncBvlData } from "@scripts/core/bvlSync";
 import { checkForUpdates } from "@scripts/core/bvlDataset";
 import * as storage from "@scripts/core/storage/sqlite";
 import { escapeHtml } from "@scripts/core/utils";
+import { initVirtualList } from "@scripts/core/virtualList";
 
 declare const bootstrap:
   | {
@@ -65,10 +66,18 @@ const numberFormatter = new Intl.NumberFormat("de-DE", {
   maximumFractionDigits: 3,
 });
 
+const USE_VIRTUAL_SCROLLING = true;
+const VIRTUAL_SCROLL_THRESHOLD = 120;
+const ESTIMATED_ITEM_HEIGHT = 440;
+const MIN_VISIBLE_VIRTUAL_ITEMS = 3;
+
 let initialized = false;
 let container: HTMLElement | null = null;
 let services: Services | null = null;
 let isSectionVisible = false;
+let virtualListInstance: ReturnType<typeof initVirtualList> | null = null;
+let virtualListContainer: HTMLElement | null = null;
+let currentResults: ReportingResult[] = [];
 
 function safeParseJson<T = any>(value: unknown): T | null {
   if (!value) {
@@ -301,6 +310,7 @@ function toggleVisibility(state: AppState): void {
     render();
   } else if (!shouldShow && isSectionVisible) {
     isSectionVisible = false;
+    destroyVirtualList();
   }
 }
 
@@ -394,6 +404,7 @@ function render(): void {
     </div>
   `;
 
+  renderResultsList(section, zulassungState);
   attachEventHandlers(section);
 }
 
@@ -415,7 +426,8 @@ function renderStatusSection(zulassungState: ZulassungState): string {
   const apiStand = zulassungState.apiStand || null;
   const manifestVersion = zulassungState.manifestVersion || null;
   const lastSyncHash = zulassungState.lastSyncHash || null;
-  const bioCount = counts.bvl_mittel_extras || 0;
+  const bioCount =
+    counts.bvl_mittel_extras || counts.mittelExtras || counts.bio || 0;
   const totalMittel = counts.mittel || counts.bvl_mittel || 0;
 
   return `
@@ -647,15 +659,13 @@ function renderResultsSection(zulassungState: ZulassungState): string {
     <div class="card mb-3">
       <div class="card-body">
         <h5 class="card-title">Ergebnisse (${results.length})</h5>
-        <div class="list-group">
-          ${results.map((result) => renderResultItem(result as ReportingResult)).join("")}
-        </div>
+        <div class="list-group" data-role="zulassung-results"></div>
       </div>
     </div>
   `;
 }
 
-function renderResultItem(result: ReportingResult): string {
+function renderResultItemContent(result: ReportingResult): string {
   const status = result.status_json
     ? safeParseJson<Record<string, any>>(result.status_json) || {}
     : {};
@@ -668,40 +678,38 @@ function renderResultItem(result: ReportingResult): string {
   const certBody = result.certification_body || extras.certification_body;
 
   return `
-    <div class="list-group-item">
-      <div class="d-flex w-100 justify-content-between align-items-start">
-        <h6 class="mb-1">${escapeHtml(result.name)}</h6>
-        <small class="text-muted">${escapeHtml(result.kennr)}</small>
-      </div>
-      <div class="mb-2">
-        <strong>Formulierung:</strong> ${escapeHtml(result.formulierung || "-")}<br>
-        <strong>Status:</strong> ${escapeHtml(status.status || "-")}
-      </div>
-      <div class="mb-2">
-        ${result.geringes_risiko ? '<span class="badge bg-success me-1"><i class="bi bi-shield-check me-1"></i>Geringes Risiko</span>' : ""}
-        ${
-          result.zul_ende
-            ? `<span class="badge bg-warning text-dark me-1"><i class="bi bi-calendar-event me-1"></i>Gültig bis: ${escapeHtml(result.zul_ende)}</span>`
-            : ""
-        }
-        ${
-          isBio
-            ? `<span class="badge bg-success-subtle text-success-emphasis me-1" title="${
-                certBody
-                  ? `Bio-zertifiziert – ${escapeHtml(certBody)}`
-                  : "Bio/Öko-zertifiziert"
-              }"><i class="bi bi-leaf-fill me-1"></i>Bio/Öko</span>`
-            : ""
-        }
-      </div>
-      ${renderResultWirkstoffe(result)}
-      ${renderResultVertrieb(result)}
-      ${renderResultGefahrhinweise(result)}
-      ${renderResultKulturen(result)}
-      ${renderResultSchadorganismen(result)}
-      ${renderResultAufwaende(result)}
-      ${renderResultWartezeiten(result)}
+    <div class="d-flex w-100 justify-content-between align-items-start">
+      <h6 class="mb-1">${escapeHtml(result.name)}</h6>
+      <small class="text-muted">${escapeHtml(result.kennr)}</small>
     </div>
+    <div class="mb-2">
+      <strong>Formulierung:</strong> ${escapeHtml(result.formulierung || "-")}<br>
+      <strong>Status:</strong> ${escapeHtml(status.status || "-")}
+    </div>
+    <div class="mb-2">
+      ${result.geringes_risiko ? '<span class="badge bg-success me-1"><i class="bi bi-shield-check me-1"></i>Geringes Risiko</span>' : ""}
+      ${
+        result.zul_ende
+          ? `<span class="badge bg-warning text-dark me-1"><i class="bi bi-calendar-event me-1"></i>Gültig bis: ${escapeHtml(result.zul_ende)}</span>`
+          : ""
+      }
+      ${
+        isBio
+          ? `<span class="badge bg-success-subtle text-success-emphasis me-1" title="${
+              certBody
+                ? `Bio-zertifiziert – ${escapeHtml(certBody)}`
+                : "Bio/Öko-zertifiziert"
+            }"><i class="bi bi-leaf-fill me-1"></i>Bio/Öko</span>`
+          : ""
+      }
+    </div>
+    ${renderResultWirkstoffe(result)}
+    ${renderResultVertrieb(result)}
+    ${renderResultGefahrhinweise(result)}
+    ${renderResultKulturen(result)}
+    ${renderResultSchadorganismen(result)}
+    ${renderResultAufwaende(result)}
+    ${renderResultWartezeiten(result)}
   `;
 }
 
@@ -872,6 +880,119 @@ function renderResultWartezeiten(result: ReportingResult): string {
       <ul class="small mb-0">${list}</ul>
     </div>
   `;
+}
+
+function destroyVirtualList(): void {
+  if (virtualListInstance) {
+    virtualListInstance.destroy();
+    virtualListInstance = null;
+  }
+
+  if (virtualListContainer) {
+    virtualListContainer.style.removeProperty("height");
+    virtualListContainer.style.removeProperty("minHeight");
+    virtualListContainer.style.removeProperty("maxHeight");
+    virtualListContainer = null;
+  }
+}
+
+function renderResultsList(
+  section: HTMLElement,
+  zulassungState: ZulassungState
+): void {
+  destroyVirtualList();
+
+  const listContainer = section.querySelector<HTMLElement>(
+    '[data-role="zulassung-results"]'
+  );
+
+  currentResults = Array.isArray(zulassungState.results)
+    ? (zulassungState.results as ReportingResult[])
+    : [];
+
+  if (!listContainer) {
+    currentResults = [];
+    return;
+  }
+
+  if (
+    !USE_VIRTUAL_SCROLLING ||
+    currentResults.length <= VIRTUAL_SCROLL_THRESHOLD
+  ) {
+    virtualListContainer = null;
+    listContainer.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+    for (const result of currentResults) {
+      const element = document.createElement("div");
+      element.className = "list-group-item";
+      element.innerHTML = renderResultItemContent(result);
+      fragment.appendChild(element);
+    }
+    listContainer.appendChild(fragment);
+    listContainer.style.removeProperty("maxHeight");
+    listContainer.style.removeProperty("minHeight");
+    listContainer.style.removeProperty("height");
+    return;
+  }
+
+  listContainer.innerHTML = "";
+  virtualListContainer = listContainer;
+  listContainer.style.removeProperty("maxHeight");
+
+  const fallbackHeight = ESTIMATED_ITEM_HEIGHT * MIN_VISIBLE_VIRTUAL_ITEMS;
+  listContainer.style.height = `${fallbackHeight}px`;
+  listContainer.style.minHeight = `${fallbackHeight}px`;
+
+  let measuredItemHeight: number | null = null;
+  let appliedHeight = fallbackHeight;
+
+  const applyViewportHeight = (itemHeight: number) => {
+    if (!itemHeight || itemHeight <= 0) {
+      return;
+    }
+    const desiredHeight = itemHeight * MIN_VISIBLE_VIRTUAL_ITEMS;
+    if (Math.abs(desiredHeight - appliedHeight) <= 1) {
+      return;
+    }
+    appliedHeight = desiredHeight;
+    const rounded = Math.round(desiredHeight);
+    listContainer.style.height = `${rounded}px`;
+    listContainer.style.minHeight = `${rounded}px`;
+  };
+
+  const handleRangeChange = () => {
+    if (measuredItemHeight !== null) {
+      return;
+    }
+    const sampleItem =
+      listContainer.querySelector<HTMLElement>(".list-group-item");
+    if (!sampleItem) {
+      return;
+    }
+    const rect = sampleItem.getBoundingClientRect();
+    if (!rect.height) {
+      return;
+    }
+    measuredItemHeight = rect.height;
+    applyViewportHeight(rect.height);
+    virtualListInstance?.updateEstimatedHeight(rect.height);
+  };
+
+  virtualListInstance = initVirtualList(listContainer, {
+    itemCount: currentResults.length,
+    estimatedItemHeight: ESTIMATED_ITEM_HEIGHT,
+    overscan: 4,
+    renderItem: (node, index) => {
+      const item = currentResults[index];
+      node.className = "list-group-item";
+      node.innerHTML = renderResultItemContent(item);
+    },
+    onRangeChange: () => {
+      handleRangeChange();
+    },
+  });
+
+  handleRangeChange();
 }
 
 function renderDebugSection(zulassungState: ZulassungState): string {
