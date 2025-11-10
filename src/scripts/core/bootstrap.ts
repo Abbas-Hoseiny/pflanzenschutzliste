@@ -1,7 +1,8 @@
-import { loadDefaultsConfig } from './config';
-import { detectPreferredDriver, setActiveDriver } from './storage/index';
-import { getState, patchState, subscribeState, updateSlice } from './state';
-import { emit, subscribe as subscribeEvent } from './eventBus';
+import { loadDefaultsConfig } from "./config";
+import { detectPreferredDriver, setActiveDriver } from "./storage/index";
+import { getState, patchState, subscribeState, updateSlice } from "./state";
+import { emit, subscribe as subscribeEvent } from "./eventBus";
+import { initStarfield } from "../features/starfield";
 
 // Feature imports - to be migrated
 // import { initStarfield } from '../features/starfield/index';
@@ -16,17 +17,18 @@ import { emit, subscribe as subscribeEvent } from './eventBus';
 function setupUnloadWarning(stateService: any): void {
   const handler = (event: BeforeUnloadEvent) => {
     event.preventDefault();
-    event.returnValue = 'Die Verbindung zur Datenbank wird getrennt. Ungespeicherte Änderungen können verloren gehen.';
+    event.returnValue =
+      "Die Verbindung zur Datenbank wird getrennt. Ungespeicherte Änderungen können verloren gehen.";
     return event.returnValue;
   };
   let active = false;
   const update = (state: any) => {
     const shouldWarn = Boolean(state.app?.hasDatabase);
     if (shouldWarn && !active) {
-      window.addEventListener('beforeunload', handler);
+      window.addEventListener("beforeunload", handler);
       active = true;
     } else if (!shouldWarn && active) {
-      window.removeEventListener('beforeunload', handler);
+      window.removeEventListener("beforeunload", handler);
       active = false;
     }
   };
@@ -35,23 +37,23 @@ function setupUnloadWarning(stateService: any): void {
 }
 
 function getRegions() {
-  const root = document.getElementById('app-root');
+  const root = document.getElementById("app-root");
   if (!root) {
-    throw new Error('app-root Container fehlt');
+    throw new Error("app-root Container fehlt");
   }
   return {
     startup: root.querySelector('[data-region="startup"]'),
     shell: root.querySelector('[data-region="shell"]'),
     main: root.querySelector('[data-region="main"]'),
-    footer: root.querySelector('[data-region="footer"]')
+    footer: root.querySelector('[data-region="footer"]'),
   };
 }
 
 export async function bootstrap() {
-  const regions = getRegions();
+  getRegions();
 
   const driverKey = detectPreferredDriver();
-  if (driverKey !== 'memory') {
+  if (driverKey !== "memory") {
     setActiveDriver(driverKey);
   }
 
@@ -62,16 +64,16 @@ export async function bootstrap() {
       getState,
       patchState,
       updateSlice,
-      subscribe: subscribeState
+      subscribe: subscribeState,
     },
     events: {
       emit,
-      subscribe: subscribeEvent
-    }
+      subscribe: subscribeEvent,
+    },
   };
 
   // Feature initialization - to be implemented in Astro components
-  // initStarfield();
+  initStarfield();
   // initShell({ shell: regions.shell, footer: regions.footer }, services);
   // initStartup(regions.startup, services);
   // initCalculation(regions.main, services);
@@ -84,7 +86,7 @@ export async function bootstrap() {
   patchState({
     app: {
       ...getState().app,
-      ready: true
-    }
+      ready: true,
+    },
   });
 }

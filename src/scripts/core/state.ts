@@ -1,4 +1,4 @@
-import { getDefaultFieldLabels } from './labels';
+import { getDefaultFieldLabels } from "./labels";
 
 export interface AppState {
   app: {
@@ -6,8 +6,8 @@ export interface AppState {
     version: string | null;
     hasFileAccess: boolean;
     hasDatabase: boolean;
-    activeSection: 'calc' | 'history' | 'zulassung' | 'settings' | 'reporting';
-    storageDriver: 'memory' | 'sqlite' | 'filesystem' | 'localstorage';
+    activeSection: "calc" | "history" | "zulassung" | "settings" | "report";
+    storageDriver: "memory" | "sqlite" | "filesystem" | "localstorage";
   };
   company: {
     name: string;
@@ -83,26 +83,26 @@ let state: AppState = {
     version: null,
     hasFileAccess: false,
     hasDatabase: false,
-    activeSection: 'calc',
-    storageDriver: 'memory'
+    activeSection: "calc",
+    storageDriver: "memory",
   },
   company: {
-    name: '',
-    headline: '',
-    logoUrl: '',
-    contactEmail: '',
-    address: '',
-    accentColor: ''
+    name: "",
+    headline: "",
+    logoUrl: "",
+    contactEmail: "",
+    address: "",
+    accentColor: "",
   },
   defaults: {
     waterPerKisteL: 5,
     kistenProAr: 300,
     form: {
-      creator: '',
-      location: '',
-      crop: '',
-      quantity: ''
-    }
+      creator: "",
+      location: "",
+      crop: "",
+      quantity: "",
+    },
   },
   measurementMethods: [],
   mediums: [],
@@ -110,7 +110,13 @@ let state: AppState = {
   fieldLabels: getDefaultFieldLabels(),
   calcContext: null,
   zulassung: {
-    filters: { culture: null, pest: null, text: '', includeExpired: false, bioOnly: false },
+    filters: {
+      culture: null,
+      pest: null,
+      text: "",
+      includeExpired: false,
+      bioOnly: false,
+    },
     results: [],
     lastSync: null,
     lastResultCounts: null,
@@ -119,17 +125,22 @@ let state: AppState = {
     manifestVersion: null,
     lastSyncHash: null,
     busy: false,
-    progress: { step: null, percent: 0, message: '' },
+    progress: { step: null, percent: 0, message: "" },
     error: null,
     logs: [],
-    debug: { schema: null, lastSyncLog: [], manifest: null, lastAutoUpdateCheck: null },
+    debug: {
+      schema: null,
+      lastSyncLog: [],
+      manifest: null,
+      lastAutoUpdateCheck: null,
+    },
     lookups: { cultures: [], pests: [] },
     autoUpdateAvailable: false,
-    autoUpdateVersion: null
+    autoUpdateVersion: null,
   },
   ui: {
-    notifications: []
-  }
+    notifications: [],
+  },
 };
 
 export function getState(): AppState {
@@ -150,7 +161,7 @@ function notify(prevState: AppState): void {
     try {
       listener(state, prevState);
     } catch (err) {
-      console.error('state listener error', err);
+      console.error("state listener error", err);
     }
   }
 }
@@ -164,12 +175,18 @@ export function patchState(patch: Partial<AppState>): AppState {
 
 export function updateSlice<K extends keyof AppState>(
   sliceKey: K,
-  updater: ((current: AppState[K], state: AppState) => AppState[K]) | AppState[K]
+  updater:
+    | ((current: AppState[K], state: AppState) => AppState[K])
+    | AppState[K]
 ): AppState {
   const currentSlice = state[sliceKey];
-  const nextSlice = typeof updater === 'function' 
-    ? (updater as (current: AppState[K], state: AppState) => AppState[K])(currentSlice, state) 
-    : updater;
+  const nextSlice =
+    typeof updater === "function"
+      ? (updater as (current: AppState[K], state: AppState) => AppState[K])(
+          currentSlice,
+          state
+        )
+      : updater;
   if (nextSlice === currentSlice) {
     return state;
   }
@@ -183,26 +200,26 @@ export function resetState(newState?: AppState): AppState {
       version: null,
       hasFileAccess: false,
       hasDatabase: false,
-      activeSection: 'calc' as const,
-      storageDriver: 'memory' as const
+      activeSection: "calc" as const,
+      storageDriver: "memory" as const,
     },
     company: {
-      name: '',
-      headline: '',
-      logoUrl: '',
-      contactEmail: '',
-      address: '',
-      accentColor: ''
+      name: "",
+      headline: "",
+      logoUrl: "",
+      contactEmail: "",
+      address: "",
+      accentColor: "",
     },
     defaults: {
       waterPerKisteL: 5,
       kistenProAr: 300,
       form: {
-        creator: '',
-        location: '',
-        crop: '',
-        quantity: ''
-      }
+        creator: "",
+        location: "",
+        crop: "",
+        quantity: "",
+      },
     },
     measurementMethods: [],
     mediums: [],
@@ -210,7 +227,13 @@ export function resetState(newState?: AppState): AppState {
     fieldLabels: getDefaultFieldLabels(),
     calcContext: null,
     zulassung: {
-      filters: { culture: null, pest: null, text: '', includeExpired: false, bioOnly: false },
+      filters: {
+        culture: null,
+        pest: null,
+        text: "",
+        includeExpired: false,
+        bioOnly: false,
+      },
       results: [],
       lastSync: null,
       lastResultCounts: null,
@@ -219,17 +242,22 @@ export function resetState(newState?: AppState): AppState {
       manifestVersion: null,
       lastSyncHash: null,
       busy: false,
-      progress: { step: null, percent: 0, message: '' },
+      progress: { step: null, percent: 0, message: "" },
       error: null,
       logs: [],
-      debug: { schema: null, lastSyncLog: [], manifest: null, lastAutoUpdateCheck: null },
+      debug: {
+        schema: null,
+        lastSyncLog: [],
+        manifest: null,
+        lastAutoUpdateCheck: null,
+      },
       lookups: { cultures: [], pests: [] },
       autoUpdateAvailable: false,
-      autoUpdateVersion: null
+      autoUpdateVersion: null,
     },
     ui: {
-      notifications: []
-    }
+      notifications: [],
+    },
   };
   const prevState = state;
   state = base;

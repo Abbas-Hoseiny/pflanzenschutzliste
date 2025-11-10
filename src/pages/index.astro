@@ -1,93 +1,53 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Shell from '../components/Shell.astro';
+import indexScript from '@scripts/pages/indexClient.ts?url';
 ---
 
 <BaseLayout title="Pflanzenschutz">
+  <div data-region="startup"></div>
   <Shell />
   
-  <main data-region="main" class="main-content">
+  <main data-region="main" class="main-content d-none">
     <div class="container py-4" style="margin-bottom: 60px;">
       <!-- Calculation Section -->
       <div id="section-calc" class="content-section" style="display: block;">
-        <div class="card bg-dark text-light">
-          <div class="card-header">
-            <h2><i class="bi bi-calculator"></i> Berechnung</h2>
-          </div>
-          <div class="card-body">
-            <p>Berechnungs-Feature wird migriert...</p>
-            <p class="text-muted">Phase 4: Feature-Komponenten in Bearbeitung</p>
-          </div>
+        <div class="section-container">
+          <div data-feature="calculation"></div>
         </div>
       </div>
       
       <!-- History Section -->
       <div id="section-history" class="content-section" style="display: none;">
-        <div class="card bg-dark text-light">
-          <div class="card-header">
-            <h2><i class="bi bi-clock-history"></i> Historie</h2>
-          </div>
-          <div class="card-body">
-            <p>Historie-Feature wird migriert...</p>
-          </div>
+        <div class="section-container">
+          <div data-feature="history"></div>
         </div>
       </div>
       
       <!-- Zulassung Section -->
       <div id="section-zulassung" class="content-section" style="display: none;">
-        <div class="card bg-dark text-light">
-          <div class="card-header">
-            <h2><i class="bi bi-file-text"></i> Zulassung</h2>
-          </div>
-          <div class="card-body">
-            <p>Zulassungs-Feature wird migriert...</p>
-          </div>
+        <div class="section-container">
+          <div data-feature="zulassung"></div>
         </div>
       </div>
       
       <!-- Settings Section -->
       <div id="section-settings" class="content-section" style="display: none;">
-        <div class="card bg-dark text-light">
-          <div class="card-header">
-            <h2><i class="bi bi-gear"></i> Einstellungen</h2>
-          </div>
-          <div class="card-body">
-            <p>Einstellungs-Feature wird migriert...</p>
-          </div>
+        <div class="section-container">
+          <div data-feature="settings"></div>
         </div>
       </div>
       
       <!-- Report Section -->
       <div id="section-report" class="content-section" style="display: none;">
-        <div class="card bg-dark text-light">
-          <div class="card-header">
-            <h2><i class="bi bi-printer"></i> Berichte</h2>
-          </div>
-          <div class="card-body">
-            <p>Berichts-Feature wird migriert...</p>
-          </div>
+        <div class="section-container">
+          <div data-feature="report"></div>
         </div>
       </div>
     </div>
   </main>
   
-  <script>
-    import { subscribe } from '@scripts/core/eventBus';
-    
-    // Handle section switching
-    subscribe('app:sectionChanged', (section: string) => {
-      // Hide all sections
-      document.querySelectorAll('.content-section').forEach(el => {
-        (el as HTMLElement).style.display = 'none';
-      });
-      
-      // Show the selected section
-      const targetSection = document.getElementById(`section-${section}`);
-      if (targetSection) {
-        targetSection.style.display = 'block';
-      }
-    });
-  </script>
+  <script type="module" src={indexScript}></script>
   
   <style>
     .main-content {

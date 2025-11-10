@@ -2,6 +2,7 @@
 import '../styles/base.css';
 import '../styles/layout.css';
 import '../styles/components.css';
+import mainScript from '../scripts/main.ts?url';
 
 interface Props {
   title?: string;
@@ -16,6 +17,9 @@ const { title = 'Pflanzenschutz' } = Astro.props;
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title}</title>
+  <link rel="icon" type="image/svg+xml" href="https://jungpflanzen.bio/wp-content/uploads/2024/01/Baerthele_Jungpflanzen_Markenzeichen.svg" />
+  <link rel="shortcut icon" href="https://jungpflanzen.bio/wp-content/uploads/2024/01/Baerthele_Jungpflanzen_Markenzeichen.svg" />
+  <link rel="apple-touch-icon" href="https://jungpflanzen.bio/wp-content/uploads/2024/01/Baerthele_Jungpflanzen_Markenzeichen.svg" />
   
   <!-- Bootstrap CDN -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
@@ -35,54 +39,6 @@ const { title = 'Pflanzenschutz' } = Astro.props;
   
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  
-  <!-- Starfield Animation -->
-  <script>
-    const starCanvas = document.getElementById('starCanvas') as HTMLCanvasElement | null;
-    if (starCanvas) {
-      const ctx = starCanvas.getContext('2d');
-      if (ctx) {
-        const stars: any[] = [];
-        const numStars = 150;
-
-        function resizeCanvas() {
-          if (starCanvas) {
-            starCanvas.width = window.innerWidth;
-            starCanvas.height = window.innerHeight;
-          }
-        }
-
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
-
-        for (let i = 0; i < numStars; i += 1) {
-          stars.push({
-            x: Math.random() * starCanvas.width,
-            y: Math.random() * starCanvas.height,
-            r: Math.random() * 2 + 0.5,
-            dx: (Math.random() - 0.5) * 0.3,
-            dy: (Math.random() - 0.5) * 0.3
-          });
-        }
-
-        function animate() {
-          if (!ctx || !starCanvas) return;
-          ctx.clearRect(0, 0, starCanvas.width, starCanvas.height);
-          ctx.fillStyle = '#fff';
-          for (const star of stars) {
-            ctx.beginPath();
-            ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
-            ctx.fill();
-            star.x += star.dx;
-            star.y += star.dy;
-            if (star.x < 0 || star.x > starCanvas.width) star.dx *= -1;
-            if (star.y < 0 || star.y > starCanvas.height) star.dy *= -1;
-          }
-          requestAnimationFrame(animate);
-        }
-        animate();
-      }
-    }
-  </script>
+  <script type="module" src={mainScript}></script>
 </body>
 </html>

@@ -1,8 +1,9 @@
 ---
 // Shell component - Navigation and Footer
+import shellScript from '@scripts/components/shellClient.ts?url';
 ---
 
-<div data-region="shell">
+<div data-region="shell" class="d-none">
   <nav class="navbar navbar-dark bg-dark navbar-expand-lg mb-4 no-print">
     <div class="container-fluid">
       <a class="navbar-brand d-flex align-items-center gap-2" href="#" id="brand-link">
@@ -50,7 +51,7 @@
   </nav>
 </div>
 
-<footer data-region="footer" class="footer bg-dark text-light py-2 no-print">
+<footer data-region="footer" class="footer bg-dark text-light py-2 no-print d-none">
   <div class="container-fluid">
     <div class="row">
       <div class="col">
@@ -63,80 +64,7 @@
   </div>
 </footer>
 
-<script>
-  import { subscribeState, updateSlice } from '@scripts/core/state';
-  import { emit } from '@scripts/core/eventBus';
-  
-  // Section management
-  const buttons = document.querySelectorAll('.nav-btn');
-  
-  buttons.forEach(button => {
-    button.addEventListener('click', (e) => {
-      const section = (e.currentTarget as HTMLElement).dataset.section;
-      if (!section) return;
-      
-      // Update state
-      updateSlice('app', (app) => ({ ...app, activeSection: section as any }));
-      
-      // Update active button
-      buttons.forEach(btn => btn.classList.remove('active'));
-      button.classList.add('active');
-      
-      // Emit event for other components
-      emit('app:sectionChanged', section);
-    });
-  });
-  
-  // Subscribe to state changes to update UI
-  subscribeState((state) => {
-    // Update brand
-    const brandTitle = document.getElementById('brand-title');
-    const brandTagline = document.getElementById('brand-tagline');
-    const appVersion = document.getElementById('app-version');
-    
-    if (brandTitle && state.company.name) {
-      brandTitle.textContent = state.company.name;
-    }
-    if (brandTagline && state.company.headline) {
-      brandTagline.textContent = state.company.headline;
-    }
-    if (appVersion && state.app.version) {
-      appVersion.textContent = `v${state.app.version}`;
-    }
-    
-    // Update active section button
-    buttons.forEach(btn => {
-      const section = btn.getAttribute('data-section');
-      if (section === state.app.activeSection) {
-        btn.classList.add('active');
-      } else {
-        btn.classList.remove('active');
-      }
-    });
-  });
-  
-  // Set initial active section
-  const calcBtn = document.querySelector('[data-section="calc"]');
-  if (calcBtn) {
-    calcBtn.classList.add('active');
-  }
-  
-  // Print hooks
-  let isPrinting = false;
-  const activeDocumentTitle = document.title || 'Pflanzenschutz';
-  
-  window.addEventListener('beforeprint', () => {
-    if (isPrinting) return;
-    isPrinting = true;
-    document.title = ' ';
-  });
-  
-  window.addEventListener('afterprint', () => {
-    if (!isPrinting) return;
-    isPrinting = false;
-    document.title = activeDocumentTitle;
-  });
-</script>
+<script type="module" src={shellScript}></script>
 
 <style>
   .navbar {

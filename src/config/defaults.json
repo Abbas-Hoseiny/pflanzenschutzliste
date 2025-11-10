@@ -1,0 +1,68 @@
+{
+  "meta": {
+    "version": 1,
+    "company": {
+      "name": "Bio-Pflanzenschutz – All in One",
+      "headline": "Bio-Pflanzenschutz – All in One",
+      "logoUrl": "https://jungpflanzen.bio/wp-content/uploads/2024/01/Baerthele_Jungpflanzen_Markenzeichen.svg",
+      "contactEmail": "abbas.hoseiny@gmx.de",
+      "address": ""
+    },
+    "defaults": {
+      "waterPerKisteL": 5,
+      "kistenProAr": 300,
+      "form": {
+        "creator": "",
+        "location": "",
+        "crop": "",
+        "quantity": ""
+      }
+    },
+    "measurementMethods": [
+      {
+        "id": "perKiste",
+        "label": "pro Kiste",
+        "type": "factor",
+        "unit": "Kiste",
+        "requires": ["kisten"],
+        "config": {
+          "sourceField": "kisten"
+        }
+      },
+      {
+        "id": "percentWater",
+        "label": "% vom Wasser",
+        "type": "percentOf",
+        "unit": "Liter",
+        "requires": ["kisten", "waterVolume"],
+        "config": {
+          "baseField": "waterVolume"
+        }
+      }
+    ]
+  },
+  "mediums": [
+    {
+      "id": "water",
+      "name": "Wasser",
+      "unit": "L",
+      "methodId": "perKiste",
+      "value": 0.0166
+    },
+    {
+      "id": "elotVis",
+      "name": "Elot-Vis",
+      "unit": "ml",
+      "methodId": "perKiste",
+      "value": 0.83
+    },
+    {
+      "id": "schachtelhalm",
+      "name": "Schachtelhalm",
+      "unit": "ml",
+      "methodId": "perKiste",
+      "value": 0.83
+    }
+  ],
+  "history": []
+}
