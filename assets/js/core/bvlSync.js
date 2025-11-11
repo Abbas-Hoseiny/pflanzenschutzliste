@@ -1,7 +1,7 @@
 /**
  * BVL Sync Orchestrator
  * Coordinates fetching and storing BVL data with progress reporting
- * Supports both manifest-based (preferred) and direct API sync (fallback)
+ * Supports manifest-based sync (default) and optional direct API sync for development
  */
 
 import { fetchCollection, computeDatasetHashes } from "./bvlClient.js";
@@ -68,19 +68,17 @@ export async function syncBvlData(storage, options = {}) {
       throw new Error("Keine Internetverbindung verfügbar");
     }
 
-    // Try manifest-based sync first if enabled
+    // Use manifest-based sync by default
     if (USE_MANIFEST_SYNC) {
-      try {
-        return await syncFromManifest(storage, { onProgress, onLog, log, startTime });
-      } catch (error) {
-        log("warn", "Manifest-based sync failed, falling back to API sync", {
-          error: error.message,
-        });
-        // Fall through to API sync
-      }
+      return await syncFromManifest(storage, {
+        onProgress,
+        onLog,
+        log,
+        startTime,
+      });
     }
 
-    // Fallback to direct API sync
+    // Optional: direct API sync (development/testing only)
     return await syncFromApi(storage, { onProgress, onLog, log, startTime });
   } catch (error) {
     const errorMessage = error.message || "Unbekannter Fehler";
@@ -116,7 +114,10 @@ export async function syncBvlData(storage, options = {}) {
 /**
  * Sync from manifest-based database
  */
-async function syncFromManifest(storage, { onProgress, onLog, log, startTime }) {
+async function syncFromManifest(
+  storage,
+  { onProgress, onLog, log, startTime }
+) {
   onProgress({
     step: "manifest",
     percent: 5,
@@ -144,7 +145,7 @@ async function syncFromManifest(storage, { onProgress, onLog, log, startTime }) 
     const meta = {
       lastSyncHash: manifestHash,
       lastSyncIso: new Date().toISOString(),
-      lastSyncCounts: manifest.tables || {},
+      lastSyncCounts: manifest.counts || manifest.tables || {},
       lastError: null,
     };
 
@@ -226,7 +227,7 @@ async function syncFromManifest(storage, { onProgress, onLog, log, startTime }) 
     lastSyncHash: manifestHash,
     lastSyncIso: new Date().toISOString(),
     lastSyncCounts: result.counts,
-    dataSource: `pflanzenschutz-db@${manifest.version}`,
+    dataSource: `pflanzenschutzliste-data@${manifest.version}`,
     manifestVersion: manifest.version,
     apiStand: manifest.api_version || manifest.build?.finished_at || null,
     lastError: null,
@@ -300,7 +301,9 @@ async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
           status: error.status,
           attempt: error.attempt,
         });
-        throw new Error(`Fehler beim Laden von ${identifier}: ${error.message}`);
+        throw new Error(
+          `Fehler beim Laden von ${identifier}: ${error.message}`
+        );
       }
     }
 
@@ -412,7 +415,10 @@ async function syncFromApi(storage, { onProgress, onLog, log, startTime }) {
     return { status: "success", meta };
   } catch (error) {
     const errorMessage = error.message || "Unbekannter Fehler";
-    log("error", "API sync failed", { error: errorMessage, stack: error.stack });
+    log("error", "API sync failed", {
+      error: errorMessage,
+      stack: error.stack,
+    });
     throw error;
   }
 }

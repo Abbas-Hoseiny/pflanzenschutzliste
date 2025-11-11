@@ -143,6 +143,102 @@ function formatAmount(value: unknown, unit: unknown): string | null {
   return trimmedUnit ? `${text} ${trimmedUnit}` : text;
 }
 
+function formatDateHtml(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Date.parse(raw);
+  if (Number.isNaN(parsed)) {
+    return escapeHtml(raw);
+  }
+
+  const formatted = new Date(parsed).toLocaleDateString("de-DE");
+  if (formatted === raw) {
+    return escapeHtml(formatted);
+  }
+
+  return `<span title="${escapeHtml(raw)}">${escapeHtml(formatted)}</span>`;
+}
+
+function normalizeText(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value).trim();
+}
+
+function formatAddressDetails(
+  adresse: Record<string, any> | null | undefined
+): string {
+  if (!adresse || typeof adresse !== "object") {
+    return "";
+  }
+
+  const lines: string[] = [];
+  for (let index = 1; index <= 6; index += 1) {
+    const key = `anschrift_${index}`;
+    const value = adresse[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        lines.push(escapeHtml(trimmed));
+      }
+    }
+  }
+
+  if (adresse.land) {
+    lines.push(escapeHtml(String(adresse.land)));
+  }
+
+  const contactParts: string[] = [];
+  if (adresse.telefon) {
+    contactParts.push(`Tel: ${escapeHtml(String(adresse.telefon))}`);
+  }
+  if (adresse.fax) {
+    contactParts.push(`Fax: ${escapeHtml(String(adresse.fax))}`);
+  }
+  if (adresse.e_mail) {
+    const email = String(adresse.e_mail).trim();
+    if (email) {
+      contactParts.push(
+        `E-Mail: <a href="mailto:${encodeURIComponent(email)}" class="text-decoration-none">${escapeHtml(email)}</a>`
+      );
+    }
+  }
+
+  const website = firstNonEmpty(adresse.website, adresse.homepage);
+  if (website) {
+    const url = String(website).trim();
+    if (url) {
+      contactParts.push(
+        `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="text-decoration-none"><i class="bi bi-box-arrow-up-right me-1"></i>Website</a>`
+      );
+    }
+  }
+
+  const reference =
+    adresse.__meta && adresse.__meta.primary_ref
+      ? String(adresse.__meta.primary_ref)
+      : null;
+
+  const linesHtml = lines.length ? `<div>${lines.join("<br>")}</div>` : "";
+  const contactsHtml = contactParts.length
+    ? `<div>${contactParts.join(" · ")}</div>`
+    : "";
+  const referenceHtml = reference
+    ? `<div>Nr.: ${escapeHtml(reference)}</div>`
+    : "";
+
+  const content = `${linesHtml}${contactsHtml}${referenceHtml}`;
+  return content ? `<div class="text-muted small mt-1">${content}</div>` : "";
+}
+
 function renderIfVisible(): void {
   if (isSectionVisible) {
     render();
@@ -415,7 +511,6 @@ function renderStatusSection(zulassungState: ZulassungState): string {
   const apiStand = zulassungState.apiStand || null;
   const manifestVersion = zulassungState.manifestVersion || null;
   const lastSyncHash = zulassungState.lastSyncHash || null;
-  const bioCount = counts.bvl_mittel_extras || 0;
   const totalMittel = counts.mittel || counts.bvl_mittel || 0;
 
   return `
@@ -430,11 +525,7 @@ function renderStatusSection(zulassungState: ZulassungState): string {
           ${lastSyncHash ? `<small class="text-muted">Hash: ${escapeHtml(lastSyncHash.substring(0, 12))}...</small><br>` : ""}
           <small class="mt-1 d-block">
             <i class="bi bi-database me-1"></i>
-            Mittel: ${totalMittel}${
-              bioCount > 0
-                ? ` <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-leaf-fill"></i> ${bioCount} Bio</span>`
-                : ""
-            }, Anwendungen: ${counts.awg || counts.bvl_awg || 0}, Kulturen: ${
+            Mittel: ${totalMittel}, Anwendungen: ${counts.awg || counts.bvl_awg || 0}, Kulturen: ${
               counts.awg_kultur || counts.bvl_awg_kultur || 0
             }, Schadorganismen: ${
               counts.awg_schadorg || counts.bvl_awg_schadorg || 0
@@ -601,20 +692,13 @@ function renderFilterSection(zulassungState: ZulassungState): string {
           <div class="col-md-4">
             <label class="form-label d-block">&nbsp;</label>
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="filter-bio" ${filters.bioOnly ? "checked" : ""}>
-              <label class="form-check-label" for="filter-bio">
-                <i class="bi bi-leaf-fill text-success me-1"></i>
-                Nur Bio/Öko-zertifizierte Mittel
+              <input class="form-check-input" type="checkbox" id="filter-expired" ${filters.includeExpired ? "checked" : ""}>
+              <label class="form-check-label" for="filter-expired">
+                <i class="bi bi-clock-history me-1"></i>
+                Abgelaufene Zulassungen einschließen
               </label>
             </div>
           </div>
-        </div>
-        <div class="form-check mt-3">
-          <input class="form-check-input" type="checkbox" id="filter-expired" ${filters.includeExpired ? "checked" : ""}>
-          <label class="form-check-label" for="filter-expired">
-            <i class="bi bi-clock-history me-1"></i>
-            Abgelaufene Zulassungen einschließen
-          </label>
         </div>
         <div class="mt-3">
           <button id="btn-search" class="btn btn-primary" ${busy ? "disabled" : ""}>
@@ -659,21 +743,15 @@ function renderResultItem(result: ReportingResult): string {
   const status = result.status_json
     ? safeParseJson<Record<string, any>>(result.status_json) || {}
     : {};
-  const extras = result.extras || {};
-  const isBio =
-    Boolean(result.is_bio) ||
-    Boolean(result.is_oeko) ||
-    Boolean(extras.is_bio) ||
-    Boolean(extras.is_oeko);
-  const certBody = result.certification_body || extras.certification_body;
 
   return `
     <div class="list-group-item">
       <div class="d-flex w-100 justify-content-between align-items-start">
         <h6 class="mb-1">${escapeHtml(result.name)}</h6>
-        <small class="text-muted">${escapeHtml(result.kennr)}</small>
+        <small class="text-muted">AWG: ${escapeHtml(result.awg_id || "-")}</small>
       </div>
       <div class="mb-2">
+        <strong>Zulassungsnummer:</strong> ${escapeHtml(result.kennr || "-")}<br>
         <strong>Formulierung:</strong> ${escapeHtml(result.formulierung || "-")}<br>
         <strong>Status:</strong> ${escapeHtml(status.status || "-")}
       </div>
@@ -685,22 +763,37 @@ function renderResultItem(result: ReportingResult): string {
             : ""
         }
         ${
-          isBio
-            ? `<span class="badge bg-success-subtle text-success-emphasis me-1" title="${
-                certBody
-                  ? `Bio-zertifiziert – ${escapeHtml(certBody)}`
-                  : "Bio/Öko-zertifiziert"
-              }"><i class="bi bi-leaf-fill me-1"></i>Bio/Öko</span>`
+          result.zulassungsende
+            ? `<span class="badge bg-info text-dark me-1"><i class="bi bi-calendar-range me-1"></i>Anwendung gültig bis: ${escapeHtml(result.zulassungsende)}</span>`
             : ""
         }
       </div>
       ${renderResultWirkstoffe(result)}
-      ${renderResultVertrieb(result)}
+      ${renderResultWirkstoffGehalt(result)}
+      ${renderResultZusatzstoffe(result)}
+      ${renderResultStaerkung(result)}
+      ${renderResultAntraege(result)}
+      ${renderResultHinweise(result)}
       ${renderResultGefahrhinweise(result)}
+      ${renderResultGefahrensymbole(result)}
+      ${renderResultSicherheitshinweise(result)}
+      ${renderResultSignalwoerter(result)}
+      ${renderResultParallelimporte(result)}
+      ${renderResultVertrieb(result)}
+      ${renderResultZusatzstoffVertrieb(result)}
+      ${renderResultStaerkungVertrieb(result)}
       ${renderResultKulturen(result)}
       ${renderResultSchadorganismen(result)}
       ${renderResultAufwaende(result)}
+      ${renderResultAuflagen(result)}
+      ${renderResultAwgPartner(result)}
+      ${renderResultAwgPartnerAufwand(result)}
+      ${renderResultAwgBemerkungen(result)}
+      ${renderResultAwgVerwendungszwecke(result)}
       ${renderResultWartezeiten(result)}
+      ${renderResultAwgWartezeitAusnahmen(result)}
+      ${renderResultAwgZeitpunkte(result)}
+      ${renderResultAwgZulassung(result)}
     </div>
   `;
 }
@@ -739,19 +832,64 @@ function renderResultVertrieb(result: ReportingResult): string {
     return "";
   }
 
+  const dedupe = new Set<string>();
   const entries = result.vertrieb
     .map((entry) => {
-      const website = entry.website
-        ? ` <a href="${escapeHtml(entry.website)}" target="_blank" rel="noopener" class="text-decoration-none"><i class="bi bi-box-arrow-up-right"></i></a>`
-        : "";
-      return `<div class="small">${escapeHtml(entry.hersteller_name || entry.firma || "-")}${website}</div>`;
+      const adresse = (entry as Record<string, any>).adresse || null;
+      const keyCandidate =
+        (adresse && adresse.__meta && adresse.__meta.primary_ref) ||
+        entry.adresse_nr ||
+        entry.vertriebsfirma_nr ||
+        entry.hersteller_nr ||
+        entry.vertriebsfirma ||
+        null;
+      const key = keyCandidate ? String(keyCandidate) : JSON.stringify(entry);
+      if (dedupe.has(key)) {
+        return null;
+      }
+      dedupe.add(key);
+
+      const displayName =
+        firstNonEmpty(
+          entry.hersteller_name,
+          entry.hersteller,
+          entry.firmenname,
+          entry.firma,
+          entry.vertriebsfirma_name,
+          entry.vertriebsfirma,
+          adresse?.firmenname,
+          adresse?.firma
+        ) || "-";
+
+      const websiteSource = firstNonEmpty(
+        entry.website,
+        adresse?.website,
+        adresse?.homepage
+      );
+      const websiteLink =
+        websiteSource && String(websiteSource).trim()
+          ? ` <a href="${escapeHtml(String(websiteSource).trim())}" target="_blank" rel="noopener" class="text-decoration-none"><i class="bi bi-box-arrow-up-right"></i></a>`
+          : "";
+
+      const addressDetails = formatAddressDetails(adresse);
+      const fallbackReference =
+        !addressDetails && keyCandidate
+          ? `<div class="text-muted small mt-1">Nr.: ${escapeHtml(String(keyCandidate))}</div>`
+          : "";
+
+      return `<div class="mb-2"><div class="small fw-semibold">${escapeHtml(displayName)}${websiteLink}</div>${addressDetails || fallbackReference}</div>`;
     })
+    .filter((entry): entry is string => Boolean(entry))
     .join("");
+
+  if (!entries) {
+    return "";
+  }
 
   return `
     <div class="mt-2">
       <strong><i class="bi bi-building me-1"></i>Hersteller/Vertrieb:</strong>
-      ${entries}
+      <div>${entries}</div>
     </div>
   `;
 }
@@ -780,6 +918,1077 @@ function renderResultGefahrhinweise(result: ReportingResult): string {
     <div class="mt-2">
       <strong><i class="bi bi-exclamation-triangle me-1"></i>Gefahrenhinweise:</strong>
       <div class="d-flex flex-wrap gap-1">${badges}</div>
+    </div>
+  `;
+}
+
+function renderResultWirkstoffGehalt(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.wirkstoff_gehalt) ||
+    result.wirkstoff_gehalt.length === 0
+  ) {
+    return "";
+  }
+  const entries = result.wirkstoff_gehalt
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const wirknr = normalizeText(
+        entry.wirknr ?? entry.wirkstoffnr ?? entry.wirk_nr
+      );
+      const variant = normalizeText(entry.wirkvar ?? entry.variante);
+      const gehaltPrim = firstNonEmpty(
+        entry.gehalt_rein_grundstruktur,
+        entry.gehalt_rein,
+        entry.gehalt
+      );
+      const gehaltEinheit = firstNonEmpty(
+        entry.gehalt_einheit,
+        entry.einheit,
+        entry.gehalt_einheit
+      );
+      const gehalt =
+        gehaltPrim !== null ? formatAmount(gehaltPrim, gehaltEinheit) : null;
+      const bio = formatAmount(entry.gehalt_bio, entry.gehalt_bio_einheit);
+
+      const detailParts: string[] = [];
+      if (gehalt) {
+        detailParts.push(`Gehalt: ${escapeHtml(gehalt)}`);
+      }
+      if (bio) {
+        detailParts.push(`Bio: ${escapeHtml(bio)}`);
+      }
+      if (variant) {
+        detailParts.push(`Variante: ${escapeHtml(variant)}`);
+      }
+
+      const header = wirknr
+        ? `<span class="fw-semibold">${escapeHtml(wirknr)}</span>`
+        : "";
+
+      if (!header && detailParts.length === 0) {
+        return null;
+      }
+
+      const details = detailParts.join(" · ");
+      return `<li>${header}${header && details ? " – " : ""}${details}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!entries) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-beaker me-1"></i>Wirkstoffgehalte:</strong>
+      <ul class="small mb-0">${entries}</ul>
+    </div>
+  `;
+}
+
+function renderResultZusatzstoffe(result: ReportingResult): string {
+  if (!Array.isArray(result.zusatzstoffe) || result.zusatzstoffe.length === 0) {
+    return "";
+  }
+
+  const list = result.zusatzstoffe
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const name = normalizeText(
+        entry.mittelname ?? entry.mittel ?? entry.name ?? "-"
+      );
+      const start = formatDateHtml(entry.genehmigung_am);
+      const end = formatDateHtml(entry.genehmigungsende);
+      const applicant = normalizeText(
+        entry.antragsteller ?? entry.antragsteller_name
+      );
+      const applicantNr = normalizeText(entry.antragsteller_nr);
+
+      const metaParts: string[] = [];
+      if (start) {
+        metaParts.push(`ab ${start}`);
+      }
+      if (end) {
+        metaParts.push(`bis ${end}`);
+      }
+      if (applicant) {
+        metaParts.push(`Antragsteller: ${escapeHtml(applicant)}`);
+      }
+      if (applicantNr) {
+        metaParts.push(`Nr.: ${escapeHtml(applicantNr)}`);
+      }
+
+      return `<li><span class="fw-semibold">${escapeHtml(
+        name || "-"
+      )}</span>${metaParts.length ? ` – ${metaParts.join(" · ")}` : ""}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-puzzle me-1"></i>Zusatzstoffe:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultZusatzstoffVertrieb(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.zusatzstoff_vertrieb) ||
+    result.zusatzstoff_vertrieb.length === 0
+  ) {
+    return "";
+  }
+
+  const list = result.zusatzstoff_vertrieb
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const name = normalizeText(
+        entry.vertriebsfirma_name ??
+          entry.vertriebsfirma ??
+          entry.firma ??
+          entry.hersteller
+      );
+      const number = normalizeText(entry.vertriebsfirma_nr ?? entry.nr);
+
+      if (!name && !number) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      if (name) {
+        parts.push(escapeHtml(name));
+      }
+      if (number) {
+        parts.push(
+          `<span class="text-muted">Nr.: ${escapeHtml(number)}</span>`
+        );
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-diagram-2 me-1"></i>Zusatzstoff-Vertrieb:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultStaerkung(result: ReportingResult): string {
+  if (!Array.isArray(result.staerkung) || result.staerkung.length === 0) {
+    return "";
+  }
+
+  const list = result.staerkung
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const name = normalizeText(entry.mittelname ?? entry.mittel ?? "-");
+      const start = formatDateHtml(entry.genehmigung_am);
+      const applicant = normalizeText(entry.antragsteller);
+      const applicantNr = normalizeText(entry.antragsteller_nr);
+
+      const metaParts: string[] = [];
+      if (start) {
+        metaParts.push(`Genehmigt am ${start}`);
+      }
+      if (applicant) {
+        metaParts.push(`Antragsteller: ${escapeHtml(applicant)}`);
+      }
+      if (applicantNr) {
+        metaParts.push(`Nr.: ${escapeHtml(applicantNr)}`);
+      }
+
+      return `<li><span class="fw-semibold">${escapeHtml(
+        name || "-"
+      )}</span>${metaParts.length ? ` – ${metaParts.join(" · ")}` : ""}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-leaf me-1"></i>Stärkungsmittel:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultStaerkungVertrieb(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.staerkung_vertrieb) ||
+    result.staerkung_vertrieb.length === 0
+  ) {
+    return "";
+  }
+
+  const list = result.staerkung_vertrieb
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const company = normalizeText(
+        entry.vertriebsfirma_name ??
+          entry.vertriebsfirma ??
+          entry.firma ??
+          entry.hersteller
+      );
+      const number = normalizeText(entry.vertriebsfirma_nr ?? entry.nr);
+
+      if (!company && !number) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      if (company) {
+        parts.push(escapeHtml(company));
+      }
+      if (number) {
+        parts.push(
+          `<span class="text-muted">Nr.: ${escapeHtml(number)}</span>`
+        );
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-diagram-2-fill me-1"></i>Stärkungsmittel-Vertrieb:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAntraege(result: ReportingResult): string {
+  if (!Array.isArray(result.antraege) || result.antraege.length === 0) {
+    return "";
+  }
+
+  const list = result.antraege
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const number = normalizeText(entry.antragnr ?? entry.nr);
+      const applicant = normalizeText(
+        entry.antragsteller ?? entry.antragsteller_name
+      );
+      const applicantNr = normalizeText(entry.antragsteller_nr);
+
+      if (!number && !applicant && !applicantNr) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      if (number) {
+        parts.push(`Antrag ${escapeHtml(number)}`);
+      }
+      if (applicant) {
+        parts.push(`von ${escapeHtml(applicant)}`);
+      }
+      if (applicantNr) {
+        parts.push(
+          `<span class="text-muted">Nr.: ${escapeHtml(applicantNr)}</span>`
+        );
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-inbox me-1"></i>Anträge:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultHinweise(result: ReportingResult): string {
+  if (!Array.isArray(result.hinweise) || result.hinweise.length === 0) {
+    return "";
+  }
+
+  const hintMap = new Map<string, string[]>();
+
+  for (const entry of result.hinweise) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const code = normalizeText(entry.hinweis ?? entry.code);
+    if (!code) {
+      continue;
+    }
+
+    const level = normalizeText(entry.ebene ?? result.kennr ?? "-") || "-";
+    if (!hintMap.has(level)) {
+      hintMap.set(level, []);
+    }
+    hintMap.get(level)!.push(code);
+  }
+
+  if (!hintMap.size) {
+    return "";
+  }
+
+  const rows = Array.from(hintMap.entries())
+    .map(([level, codes]) => {
+      const uniqueCodes = Array.from(new Set(codes.filter(Boolean)));
+      if (!uniqueCodes.length) {
+        return null;
+      }
+      const badges = uniqueCodes
+        .map(
+          (code) =>
+            `<span class="badge bg-secondary">${escapeHtml(code)}</span>`
+        )
+        .join(" ");
+      return `<li><span class="fw-semibold">${escapeHtml(
+        level
+      )}</span>: ${badges}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!rows) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-info-circle me-1"></i>Hinweise:</strong>
+      <ul class="small mb-0 d-flex flex-column gap-1">${rows}</ul>
+    </div>
+  `;
+}
+
+function renderResultGefahrensymbole(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.gefahrensymbole) ||
+    result.gefahrensymbole.length === 0
+  ) {
+    return "";
+  }
+
+  const unique = Array.from(
+    new Set(
+      result.gefahrensymbole
+        .map((entry) =>
+          entry && typeof entry === "object"
+            ? normalizeText(entry.gefahrensymbol ?? entry.symbol ?? entry.code)
+            : ""
+        )
+        .filter((code) => code)
+    )
+  );
+
+  if (!unique.length) {
+    return "";
+  }
+
+  const badges = unique
+    .map(
+      (code) =>
+        `<span class="badge bg-dark text-light border border-light">${escapeHtml(code)}</span>`
+    )
+    .join(" ");
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-sign-stop me-1"></i>Gefahrensymbole:</strong>
+      <div class="d-flex flex-wrap gap-1">${badges}</div>
+    </div>
+  `;
+}
+
+function renderResultSicherheitshinweise(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.sicherheitshinweise) ||
+    result.sicherheitshinweise.length === 0
+  ) {
+    return "";
+  }
+
+  const unique = Array.from(
+    new Set(
+      result.sicherheitshinweise
+        .map((entry) =>
+          entry && typeof entry === "object"
+            ? normalizeText(
+                entry.sicherheitshinweis ??
+                  entry.p_code ??
+                  entry.p_satz ??
+                  entry.code
+              )
+            : ""
+        )
+        .filter((code) => code)
+    )
+  );
+
+  if (!unique.length) {
+    return "";
+  }
+
+  const badges = unique
+    .map(
+      (code) =>
+        `<span class="badge bg-warning text-dark">${escapeHtml(code)}</span>`
+    )
+    .join(" ");
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-shield-exclamation me-1"></i>Sicherheitshinweise:</strong>
+      <div class="d-flex flex-wrap gap-1">${badges}</div>
+    </div>
+  `;
+}
+
+function renderResultSignalwoerter(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.signalwoerter) ||
+    result.signalwoerter.length === 0
+  ) {
+    return "";
+  }
+
+  const unique = Array.from(
+    new Set(
+      result.signalwoerter
+        .map((entry) =>
+          entry && typeof entry === "object"
+            ? normalizeText(entry.signalwort ?? entry.signal_word ?? entry.code)
+            : ""
+        )
+        .filter((code) => code)
+    )
+  );
+
+  if (!unique.length) {
+    return "";
+  }
+
+  const badges = unique
+    .map(
+      (value) => `<span class="badge bg-secondary">${escapeHtml(value)}</span>`
+    )
+    .join(" ");
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-signpost me-1"></i>Signalwörter:</strong>
+      <div class="d-flex flex-wrap gap-1">${badges}</div>
+    </div>
+  `;
+}
+
+function renderResultParallelimporte(result: ReportingResult): string {
+  const sections: string[] = [];
+
+  const buildList = (
+    entries: Array<Record<string, any>> | null | undefined,
+    title: string,
+    variant: "valid" | "expired"
+  ) => {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return;
+    }
+
+    const items = entries
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+
+        const name = normalizeText(
+          entry.pi_mittelname ?? entry.mittelname ?? "-"
+        );
+        const importer = normalizeText(
+          entry.importeur_txt ?? entry.importeur_name ?? entry.importeur
+        );
+        const importerCode = normalizeText(entry.importeur);
+        const importerNr = normalizeText(entry.importeur_nr);
+        const reference = normalizeText(
+          entry.pi_referenz_kennr ?? entry.referenz_kennr
+        );
+        const kennziffer = normalizeText(
+          entry.pi_kennziffer ?? entry.kennziffer
+        );
+        const status = normalizeText(entry.pi_status ?? entry.status);
+        const gueltig = formatDateHtml(entry.gueltig);
+        const bescheidNr = normalizeText(
+          entry.pi_bescheidnr ?? entry.bescheid_nr
+        );
+        const bescheidDatum = formatDateHtml(entry.bescheid_datum);
+        const bescheinigung = normalizeText(entry.bescheinigung);
+
+        const headline = `<span class="fw-semibold">${escapeHtml(
+          name || "-"
+        )}</span>`;
+
+        const metaParts: string[] = [];
+        if (importer) {
+          const suffix =
+            importerCode && importerCode !== importer
+              ? ` (${escapeHtml(importerCode)})`
+              : "";
+          metaParts.push(`Importeur: ${escapeHtml(importer)}${suffix}`);
+        }
+        if (importerNr) {
+          metaParts.push(`Nr.: ${escapeHtml(importerNr)}`);
+        }
+        if (reference) {
+          metaParts.push(`Referenz: ${escapeHtml(reference)}`);
+        }
+        if (kennziffer) {
+          metaParts.push(`Kennziffer: ${escapeHtml(kennziffer)}`);
+        }
+        if (status) {
+          metaParts.push(`Status: ${escapeHtml(status)}`);
+        }
+        if (gueltig) {
+          const label = variant === "expired" ? "Ausgelaufen am" : "Gültig bis";
+          metaParts.push(`${label} ${gueltig}`);
+        }
+        if (bescheidNr) {
+          metaParts.push(`Bescheid ${escapeHtml(bescheidNr)}`);
+        }
+        if (bescheidDatum) {
+          metaParts.push(`vom ${bescheidDatum}`);
+        }
+        if (bescheinigung) {
+          metaParts.push(`Bescheinigung: ${escapeHtml(bescheinigung)}`);
+        }
+
+        const meta =
+          metaParts.length > 0
+            ? `<div class="small text-muted">${metaParts.join(" · ")}</div>`
+            : "";
+
+        return `<li>${headline}${meta}</li>`;
+      })
+      .filter((entry): entry is string => Boolean(entry))
+      .join("");
+
+    if (!items) {
+      return;
+    }
+
+    sections.push(`
+      <div class="mt-2">
+        <em class="d-block">${escapeHtml(title)}:</em>
+        <ul class="small mb-0">${items}</ul>
+      </div>
+    `);
+  };
+
+  buildList(result.parallelimporte_gueltig, "Gültige Parallelimporte", "valid");
+  buildList(
+    result.parallelimporte_abgelaufen,
+    "Abgelaufene Parallelimporte",
+    "expired"
+  );
+
+  if (!sections.length) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-arrow-left-right me-1"></i>Parallelimporte:</strong>
+      ${sections.join("")}
+    </div>
+  `;
+}
+
+function renderResultAuflagen(result: ReportingResult): string {
+  if (!Array.isArray(result.auflagen) || result.auflagen.length === 0) {
+    return "";
+  }
+
+  const list = result.auflagen
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const code = normalizeText(entry.auflage ?? entry.code);
+      const level = normalizeText(entry.ebene);
+      const culture = normalizeText(entry.kultur);
+      const condition = normalizeText(entry.weitere_bedingung);
+      const technique = normalizeText(entry.anwendungstechnik);
+      const distance = normalizeText(entry.abstand);
+      const reducedDistance = normalizeText(entry.redu_abstand);
+      const requirement = normalizeText(entry.anwendbest);
+
+      const metaParts: string[] = [];
+      if (level) {
+        metaParts.push(`Ebene: ${escapeHtml(level)}`);
+      }
+      if (culture) {
+        metaParts.push(`Kultur: ${escapeHtml(culture)}`);
+      }
+      if (condition) {
+        metaParts.push(escapeHtml(condition));
+      }
+      if (technique) {
+        metaParts.push(`Technik: ${escapeHtml(technique)}`);
+      }
+      if (distance) {
+        metaParts.push(`Abstand: ${escapeHtml(distance)}`);
+      }
+      if (reducedDistance) {
+        metaParts.push(`reduz. Abstand: ${escapeHtml(reducedDistance)}`);
+      }
+
+      const reductions =
+        Array.isArray((entry as any).reduzierung) &&
+        (entry as any).reduzierung.length > 0
+          ? (entry as any).reduzierung
+              .map((redu: Record<string, any>) => {
+                if (!redu || typeof redu !== "object") {
+                  return null;
+                }
+                const category = normalizeText(redu.kategorie);
+                const value = normalizeText(redu.redu_abstand ?? redu.wert);
+                const parts: string[] = [];
+                if (category) {
+                  parts.push(escapeHtml(category));
+                }
+                if (value) {
+                  parts.push(escapeHtml(value));
+                }
+                if (!parts.length) {
+                  return null;
+                }
+                return `<span class="badge bg-light text-dark border">${parts.join(" – ")}</span>`;
+              })
+              .filter((redu: string | null): redu is string => Boolean(redu))
+              .join(" ")
+          : "";
+
+      const header = code
+        ? `<span class="fw-semibold">${escapeHtml(code)}</span>`
+        : `<span class="fw-semibold">Auflage</span>`;
+      const requirementBadge = requirement
+        ? ` <span class="badge bg-secondary">${escapeHtml(requirement)}</span>`
+        : "";
+      const metaHtml =
+        metaParts.length > 0
+          ? `<div class="small text-muted">${metaParts.join(" · ")}</div>`
+          : "";
+      const reductionHtml = reductions
+        ? `<div class="mt-1 d-flex flex-wrap gap-1">${reductions}</div>`
+        : "";
+
+      return `<li>${header}${requirementBadge}${metaHtml}${reductionHtml}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-clipboard-check me-1"></i>Auflagen:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAwgPartner(result: ReportingResult): string {
+  if (!Array.isArray(result.awg_partner) || result.awg_partner.length === 0) {
+    return "";
+  }
+
+  const list = result.awg_partner
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const partnerKennr = normalizeText(entry.partner_kennr ?? entry.kennr);
+      const art = normalizeText(entry.mischung_art ?? entry.art);
+
+      if (!partnerKennr && !art) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      if (partnerKennr) {
+        parts.push(`Partner: ${escapeHtml(partnerKennr)}`);
+      }
+      if (art) {
+        parts.push(`Art: ${escapeHtml(art)}`);
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-diagram-3 me-1"></i>Mischpartner:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAwgPartnerAufwand(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.awg_partner_aufwand) ||
+    result.awg_partner_aufwand.length === 0
+  ) {
+    return "";
+  }
+
+  const list = result.awg_partner_aufwand
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const partnerKennr = normalizeText(entry.partner_kennr ?? entry.kennr);
+      const condition = normalizeText(
+        entry.aufwandbedingung ?? entry.aufwand_bedingung
+      );
+      const amount = formatAmount(
+        entry.m_aufwand ?? entry.mittel_menge,
+        entry.m_aufwand_einheit ?? entry.mittel_einheit
+      );
+
+      const parts: string[] = [];
+      if (partnerKennr) {
+        parts.push(`Partner: ${escapeHtml(partnerKennr)}`);
+      }
+      if (condition) {
+        parts.push(`Bedingung: ${escapeHtml(condition)}`);
+      }
+      if (amount) {
+        parts.push(`Menge: ${escapeHtml(amount)}`);
+      }
+
+      if (!parts.length) {
+        return null;
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-droplet-half me-1"></i>Mischpartner-Aufwand:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAwgBemerkungen(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.awg_bemerkungen) ||
+    result.awg_bemerkungen.length === 0
+  ) {
+    return "";
+  }
+
+  const list = result.awg_bemerkungen
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const note = normalizeText(entry.auflage_bem ?? entry.bemerkung);
+      const area = normalizeText(entry.auflage_bereich ?? entry.bereich);
+
+      if (!note && !area) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      if (note) {
+        parts.push(escapeHtml(note));
+      }
+      if (area) {
+        parts.push(
+          `<span class="text-muted">Bereich: ${escapeHtml(area)}</span>`
+        );
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-chat-left-text me-1"></i>AWG-Bemerkungen:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAwgVerwendungszwecke(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.awg_verwendungszwecke) ||
+    result.awg_verwendungszwecke.length === 0
+  ) {
+    return "";
+  }
+
+  const unique = Array.from(
+    new Set(
+      result.awg_verwendungszwecke
+        .map((entry) =>
+          entry && typeof entry === "object"
+            ? normalizeText(entry.verwendungszweck ?? entry.code)
+            : ""
+        )
+        .filter((code) => code)
+    )
+  );
+
+  if (!unique.length) {
+    return "";
+  }
+
+  const badges = unique
+    .map((code) => `<span class="badge bg-primary">${escapeHtml(code)}</span>`)
+    .join(" ");
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-list-task me-1"></i>Verwendungszwecke:</strong>
+      <div class="d-flex flex-wrap gap-1">${badges}</div>
+    </div>
+  `;
+}
+
+function renderResultAwgWartezeitAusnahmen(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.awg_wartezeit_ausnahmen) ||
+    result.awg_wartezeit_ausnahmen.length === 0
+  ) {
+    return "";
+  }
+
+  const labelMap = new Map<string, string>();
+  if (Array.isArray(result.kulturen)) {
+    for (const entry of result.kulturen) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const code = normalizeText((entry as any).kultur);
+      const label = normalizeText((entry as any).label);
+      if (code && label) {
+        labelMap.set(code, label);
+      }
+    }
+  }
+  if (Array.isArray(result.wartezeiten)) {
+    for (const entry of result.wartezeiten) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const code = normalizeText((entry as any).kultur);
+      const label = normalizeText((entry as any).kultur_label);
+      if (code && label && !labelMap.has(code)) {
+        labelMap.set(code, label);
+      }
+    }
+  }
+
+  const list = result.awg_wartezeit_ausnahmen
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const wartezeitNr = normalizeText(entry.awg_wartezeit_nr);
+      const kulturCode = normalizeText(entry.kultur);
+
+      if (!wartezeitNr && !kulturCode) {
+        return null;
+      }
+
+      const displayLabel = kulturCode
+        ? labelMap.get(kulturCode) || kulturCode
+        : "";
+
+      const parts: string[] = [];
+      if (displayLabel) {
+        parts.push(escapeHtml(displayLabel));
+      }
+      if (wartezeitNr) {
+        parts.push(
+          `<span class="text-muted">Nr.: ${escapeHtml(wartezeitNr)}</span>`
+        );
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-hourglass-split me-1"></i>Wartezeit-Ausnahmen:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAwgZeitpunkte(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.awg_zeitpunkte) ||
+    result.awg_zeitpunkte.length === 0
+  ) {
+    return "";
+  }
+
+  const list = result.awg_zeitpunkte
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const zeitpunkt = normalizeText(entry.zeitpunkt ?? entry.code);
+      const sortierNr = normalizeText(entry.sortier_nr);
+      const operand = normalizeText(entry.operand_zu_vorher ?? entry.operand);
+
+      if (!zeitpunkt && !sortierNr && !operand) {
+        return null;
+      }
+
+      const parts: string[] = [];
+      if (zeitpunkt) {
+        parts.push(escapeHtml(zeitpunkt));
+      }
+      if (sortierNr) {
+        parts.push(
+          `<span class="text-muted">Pos.: ${escapeHtml(sortierNr)}</span>`
+        );
+      }
+      if (operand) {
+        parts.push(
+          `<span class="text-muted">Operand: ${escapeHtml(operand)}</span>`
+        );
+      }
+
+      return `<li>${parts.join(" · ")}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-calendar-week me-1"></i>Anwendungszeitpunkte:</strong>
+      <ul class="small mb-0">${list}</ul>
+    </div>
+  `;
+}
+
+function renderResultAwgZulassung(result: ReportingResult): string {
+  if (
+    !Array.isArray(result.awg_zulassung) ||
+    result.awg_zulassung.length === 0
+  ) {
+    return "";
+  }
+
+  const list = result.awg_zulassung
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const end = formatDateHtml(entry.zul_ende ?? entry.gueltig_bis);
+      if (!end) {
+        return null;
+      }
+
+      return `<li>Gültig bis ${end}</li>`;
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join("");
+
+  if (!list) {
+    return "";
+  }
+
+  return `
+    <div class="mt-2">
+      <strong><i class="bi bi-calendar-check me-1"></i>AWG-Zulassung:</strong>
+      <ul class="small mb-0">${list}</ul>
     </div>
   `;
 }
@@ -1040,7 +2249,6 @@ function attachEventHandlers(section: HTMLElement): void {
   const filterText = section.querySelector<HTMLInputElement>("#filter-text");
   const filterExpired =
     section.querySelector<HTMLInputElement>("#filter-expired");
-  const filterBio = section.querySelector<HTMLInputElement>("#filter-bio");
   const btnApplyUpdate =
     section.querySelector<HTMLButtonElement>("#btn-apply-update");
 
@@ -1090,16 +2298,6 @@ function attachEventHandlers(section: HTMLElement): void {
       services!.state.updateSlice("zulassung", (prev) => ({
         ...prev,
         filters: { ...prev.filters, includeExpired: target.checked },
-      }));
-    });
-  }
-
-  if (filterBio && services) {
-    filterBio.addEventListener("change", (event) => {
-      const target = event.target as HTMLInputElement;
-      services!.state.updateSlice("zulassung", (prev) => ({
-        ...prev,
-        filters: { ...prev.filters, bioOnly: target.checked },
       }));
     });
   }
@@ -1240,7 +2438,6 @@ function handleClearFilters(): void {
       pest: null,
       text: "",
       includeExpired: false,
-      bioOnly: false,
     },
     results: [],
   }));

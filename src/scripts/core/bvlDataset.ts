@@ -1,10 +1,11 @@
 // @ts-nocheck
 /**
  * BVL Dataset Module
- * Handles manifest-based data fetching from pflanzenschutz-db repository
+ * Handles manifest-based data fetching from pflanzenschutzliste-data repository
  */
 
-const DEFAULT_MANIFEST_URL = "https://abbas-hoseiny.github.io/pflanzenschutz-db/manifest.json";
+const DEFAULT_MANIFEST_URL =
+  "https://abbas-hoseiny.github.io/pflanzenschutzliste-data/latest/manifest.json";
 const MANIFEST_STORAGE_KEY = "bvlManifestUrl";
 
 export class ManifestError extends Error {
@@ -20,6 +21,28 @@ export class DownloadError extends Error {
     this.name = "DownloadError";
     this.url = url;
   }
+}
+
+let fflateLoader = null;
+
+async function loadFflate() {
+  if (typeof window !== "undefined" && window.fflate) {
+    return window.fflate;
+  }
+
+  if (!fflateLoader) {
+    fflateLoader = (async () => {
+      try {
+        return await import("fflate");
+      } catch (error) {
+        return await import(
+          "https://cdn.jsdelivr.net/npm/fflate@0.8.1/esm/browser.js"
+        );
+      }
+    })();
+  }
+
+  return fflateLoader;
 }
 
 /**
@@ -87,8 +110,19 @@ export async function fetchManifest(options = {}) {
     if (!manifest.files || !Array.isArray(manifest.files)) {
       throw new ManifestError("Manifest missing required field: files");
     }
-    if (!manifest.tables || typeof manifest.tables !== "object") {
-      throw new ManifestError("Manifest missing required field: tables");
+
+    // Attach helper metadata for downstream consumers
+    try {
+      manifest.manifestUrl = manifestUrl;
+      const baseCandidate = manifest.baseUrl || manifest.base_url || "./";
+      manifest.baseUrlResolved = new URL(baseCandidate, manifestUrl).toString();
+    } catch (resolveError) {
+      console.warn(
+        "Failed to resolve manifest base URL, using default",
+        resolveError
+      );
+      manifest.baseUrlResolved =
+        "https://abbas-hoseiny.github.io/pflanzenschutzliste-data/latest/";
     }
 
     return manifest;
@@ -107,10 +141,13 @@ export async function fetchManifest(options = {}) {
 /**
  * Check if DecompressionStream with brotli is supported
  */
-function supportsBrotli() {
+function supportsStreamDecompression(kind) {
   try {
-    return typeof DecompressionStream !== "undefined" && 
-           new DecompressionStream("deflate") !== null; // Test with deflate first
+    if (typeof DecompressionStream === "undefined") {
+      return false;
+    }
+    const stream = new DecompressionStream(kind);
+    return !!stream;
   } catch (e) {
     return false;
   }
@@ -123,16 +160,22 @@ export function selectBestFile(manifest) {
   const files = manifest.files;
 
   // Prefer .sqlite.br if brotli is supported
-  if (supportsBrotli()) {
+  if (supportsStreamDecompression("br")) {
     const brFile = files.find((f) => f.path.endsWith(".sqlite.br"));
     if (brFile) {
       return { file: brFile, format: "brotli" };
     }
   }
 
+  // Prefer gzip next (fallback to JS decompressor if stream API missing)
+  const gzFile = files.find((f) => f.path.endsWith(".sqlite.gz"));
+  if (gzFile) {
+    return { file: gzFile, format: "gzip" };
+  }
+
   // Fallback to plain .sqlite
-  const sqliteFile = files.find((f) => 
-    f.path.endsWith(".sqlite") && !f.path.includes(".")
+  const sqliteFile = files.find(
+    (f) => f.path.endsWith(".sqlite") && !f.path.includes(".")
   );
   if (sqliteFile) {
     return { file: sqliteFile, format: "plain" };
@@ -164,10 +207,7 @@ export async function downloadFile(url, options = {}) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new DownloadError(
-        `Download failed: HTTP ${response.status}`,
-        url
-      );
+      throw new DownloadError(`Download failed: HTTP ${response.status}`, url);
     }
 
     const contentLength = parseInt(
@@ -256,6 +296,61 @@ async function decompressBrotli(compressedData) {
   }
 }
 
+async function decompressGzip(compressedData) {
+  try {
+    if (supportsStreamDecompression("gzip")) {
+      const ds = new DecompressionStream("gzip");
+      const writer = ds.writable.getWriter();
+      const reader = ds.readable.getReader();
+
+      writer.write(compressedData);
+      writer.close();
+
+      const chunks = [];
+      let totalLength = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        totalLength += value.length;
+      }
+
+      const result = new Uint8Array(totalLength);
+      let position = 0;
+      for (const chunk of chunks) {
+        result.set(chunk, position);
+        position += chunk.length;
+      }
+
+      return result;
+    }
+
+    const fflate = await loadFflate();
+    const gunzipSync = fflate.gunzipSync || null;
+
+    if (gunzipSync) {
+      return gunzipSync(compressedData);
+    }
+
+    if (typeof fflate.gunzip === "function") {
+      return await new Promise((resolve, reject) => {
+        fflate.gunzip(compressedData, (err, result) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(result);
+          }
+        });
+      });
+    }
+
+    throw new Error("No gzip decompressor available");
+  } catch (error) {
+    throw new Error(`Gzip decompression failed: ${error.message}`);
+  }
+}
+
 /**
  * Decompress ZIP-compressed data (assumes single file in archive)
  */
@@ -272,8 +367,23 @@ async function decompressZip(compressedData) {
  */
 export async function downloadDatabase(manifest, options = {}) {
   const { onProgress = null } = options;
-  const baseUrl = manifest.base_url || "https://abbas-hoseiny.github.io/pflanzenschutz-db/";
-  
+  let baseUrl =
+    manifest.baseUrlResolved ||
+    manifest.baseUrl ||
+    manifest.base_url ||
+    "https://abbas-hoseiny.github.io/pflanzenschutzliste-data/latest/";
+
+  try {
+    baseUrl = new URL(baseUrl, manifest.manifestUrl || baseUrl).toString();
+  } catch (resolveError) {
+    console.warn(
+      "Failed to normalize base URL, falling back to default",
+      resolveError
+    );
+    baseUrl =
+      "https://abbas-hoseiny.github.io/pflanzenschutzliste-data/latest/";
+  }
+
   // Select best file format
   const { file, format } = selectBestFile(manifest);
   const fileUrl = new URL(file.path, baseUrl).toString();
@@ -311,6 +421,15 @@ export async function downloadDatabase(manifest, options = {}) {
       });
     }
     sqliteData = await decompressBrotli(compressed);
+  } else if (format === "gzip") {
+    if (onProgress) {
+      onProgress({
+        step: "decompress",
+        message: "Entpacke Datenbank...",
+        percent: 70,
+      });
+    }
+    sqliteData = await decompressGzip(compressed);
   } else if (format === "zip") {
     if (onProgress) {
       onProgress({
@@ -349,7 +468,7 @@ export async function checkForUpdates(currentHash) {
   try {
     const manifest = await fetchManifest();
     const manifestHash = manifest.hash || manifest.version;
-    
+
     return {
       available: currentHash !== manifestHash,
       manifest: manifest,

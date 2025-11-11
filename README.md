@@ -7,17 +7,17 @@ Statische Web-Anwendung zur Verwaltung, Berechnung und Dokumentation von Pflanze
 - Moderne Single-Page-App (ES-Module, kein Build-Step nötig)
 - Persistent gespeicherte Berechnungen, History und Stammdaten
 - SQLite-WASM mit OPFS-Unterstützung, Fallback auf JSON-Dateien oder LocalStorage
-- **BVL-Zulassungsdaten**: Automatischer Sync aus vorbereiteter SQLite-Datenbank via [pflanzenschutz-db](https://github.com/Abbas-Hoseiny/pflanzenschutz-db)
+- **BVL-Zulassungsdaten**: Automatischer Sync aus vorbereiteter SQLite-Datenbank via [pflanzenschutzliste-data](https://github.com/Abbas-Hoseiny/pflanzenschutzliste-data)
 - Sofortdruck (PDF) und Export/Import von Datenbank-Dateien
 - Nutzerfreundliche Features wie `beforeunload`-Hinweis bei aktiver Datenbankverbindung
 
 ## Datenversorgung
 
-Die Anwendung bezieht BVL-Zulassungsdaten aus dem externen Repository [pflanzenschutz-db](https://github.com/Abbas-Hoseiny/pflanzenschutz-db), das per ETL-Pipeline eine komplette SQLite-Datenbank erzeugt und über GitHub Pages bereitstellt.
+Die Anwendung bezieht BVL-Zulassungsdaten aus dem externen Repository [pflanzenschutzliste-data](https://github.com/Abbas-Hoseiny/pflanzenschutzliste-data), das per GitHub Action täglich eine komplette SQLite-Datenbank erzeugt und über GitHub Pages bereitstellt.
 
 ### Manifest-basierte Synchronisation
 
-Statt zur Laufzeit die BVL-API direkt abzufragen, lädt die App ein `manifest.json` von `https://abbas-hoseiny.github.io/pflanzenschutz-db/`, prüft die Version und lädt bei Bedarf die vorbereitete SQLite-Datei herunter. Dies bietet mehrere Vorteile:
+Statt zur Laufzeit die BVL-API direkt abzufragen, lädt die App ein `manifest.json` von `https://abbas-hoseiny.github.io/pflanzenschutzliste-data/latest/manifest.json`, prüft die Version und lädt bei Bedarf die vorbereitete SQLite-Datei herunter. Dies bietet mehrere Vorteile:
 
 - **Schnellerer Sync**: Eine einzelne Datei statt 40+ API-Aufrufe
 - **Offline-fähig**: Daten können lokal vorgehalten werden
@@ -30,10 +30,10 @@ Für Tests oder alternative Datenquellen kann die Manifest-URL in der Browser-Ko
 
 ```javascript
 // Eigene Manifest-URL setzen
-localStorage.setItem('bvlManifestUrl', 'https://example.com/my-manifest.json');
+localStorage.setItem("bvlManifestUrl", "https://example.com/my-manifest.json");
 
 // Zurück zur Standard-URL
-localStorage.removeItem('bvlManifestUrl');
+localStorage.removeItem("bvlManifestUrl");
 ```
 
 Nach dem Ändern der URL einmal die Seite neu laden und dann "Daten aktualisieren" klicken.
@@ -50,11 +50,11 @@ Nach dem Ändern der URL einmal die Seite neu laden und dann "Daten aktualisiere
 
 ## Storage-Treiber & Browser-Support
 
-| Treiber | Format | Persistenz | Voraussetzungen | Empfohlen für |
-| --- | --- | --- | --- | --- |
-| SQLite-WASM | `.sqlite`/`.db` | OPFS (Chromium) oder In-Memory | Chromium ≥108, HTTPS/localhost, WebAssembly | Produktive Nutzung, große Historien |
-| File System Access | `.json` | Lokale Datei via Picker | Chromium ≥86, HTTPS/localhost | Kleine/mittlere Datenmengen, manuelles Speichern |
-| LocalStorage | `.json` | Browser-Storage (max. ~10 MB) | Alle modernen Browser | Demo/Test ohne Dateizugriff |
+| Treiber            | Format          | Persistenz                     | Voraussetzungen                             | Empfohlen für                                    |
+| ------------------ | --------------- | ------------------------------ | ------------------------------------------- | ------------------------------------------------ |
+| SQLite-WASM        | `.sqlite`/`.db` | OPFS (Chromium) oder In-Memory | Chromium ≥108, HTTPS/localhost, WebAssembly | Produktive Nutzung, große Historien              |
+| File System Access | `.json`         | Lokale Datei via Picker        | Chromium ≥86, HTTPS/localhost               | Kleine/mittlere Datenmengen, manuelles Speichern |
+| LocalStorage       | `.json`         | Browser-Storage (max. ~10 MB)  | Alle modernen Browser                       | Demo/Test ohne Dateizugriff                      |
 
 > Firefox & Safari unterstützen aktuell kein OPFS. In diesen Browsern läuft SQLite im Speicher und Änderungen sollten zusätzlich als JSON oder SQLite-Datei exportiert werden.
 
@@ -87,13 +87,13 @@ Nach dem Ändern der URL einmal die Seite neu laden und dann "Daten aktualisiere
 
 ### SQLite-Schema
 
-| Tabelle | Inhalt |
-| --- | --- |
-| `meta` | Schlüssel/Werte für Company, Defaults, Labels, Version |
-| `measurement_methods` | Messmethoden inkl. Konfiguration (JSON in Spalten) |
-| `mediums` | Mittel mit Referenz auf Messmethode |
-| `history` | Header eines Historien-Eintrags (JSON) |
-| `history_items` | Detailwerte pro Mittel |
+| Tabelle               | Inhalt                                                 |
+| --------------------- | ------------------------------------------------------ |
+| `meta`                | Schlüssel/Werte für Company, Defaults, Labels, Version |
+| `measurement_methods` | Messmethoden inkl. Konfiguration (JSON in Spalten)     |
+| `mediums`             | Mittel mit Referenz auf Messmethode                    |
+| `history`             | Header eines Historien-Eintrags (JSON)                 |
+| `history_items`       | Detailwerte pro Mittel                                 |
 
 SQL-Definition: `assets/js/core/storage/schema.sql`.
 

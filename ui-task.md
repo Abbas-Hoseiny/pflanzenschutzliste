@@ -2,7 +2,7 @@
 
 ## Kontext
 
-- Das Frontend (`assets/js`) synchronisiert künftig ausschließlich die per Manifest ausgelieferte SQLite-Datenbank aus dem `pflanzenschutz-db`-Repo (vgl. `db-task.md`).
+- Das Frontend (`assets/js`) synchronisiert künftig ausschließlich die per Manifest ausgelieferte SQLite-Datenbank aus dem `pflanzenschutzliste-data`-Repo (vgl. `db-task.md`).
 - Die UI muss sämtliche Inhalte aus den reduzierten Tabellen anzeigen, Bio-Produkte prominent kennzeichnen und zusätzliche Komfortfunktionen (Filter, Fortschritt, Auto-Update-Prüfung) bieten.
 - Zielgruppe sind praxisnahe Anwender:innen: klare Badges, verständliche Tooltips, moderne Icons/Farben (Bootstrap 5 / Bootstrap Icons), aussagekräftige Fehlermeldungen.
 

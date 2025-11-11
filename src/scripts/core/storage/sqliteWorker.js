@@ -12,6 +12,87 @@ let currentMode = "memory";
 const SQLITE_WASM_CDN =
   "https://cdn.jsdelivr.net/npm/@sqlite.org/sqlite-wasm@3.46.1-build1/sqlite-wasm/jswasm/";
 
+function getFieldValue(record, fieldName) {
+  if (!record || !fieldName) {
+    return null;
+  }
+
+  const candidates = [
+    fieldName,
+    fieldName.toLowerCase(),
+    fieldName.toUpperCase(),
+  ];
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      const value = record[key];
+      if (value === null || value === undefined || value === "") {
+        return null;
+      }
+      return String(value);
+    }
+  }
+  return null;
+}
+
+function safeParseJson(text) {
+  if (typeof text !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    console.warn("Failed to parse payload JSON", error);
+    return null;
+  }
+}
+
+function normalizePayloadRecord(record) {
+  if (!record || typeof record !== "object") {
+    return record;
+  }
+  const normalized = {};
+  for (const [key, value] of Object.entries(record)) {
+    normalized[key] = value;
+    const lower = key.toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(normalized, lower)) {
+      normalized[lower] = value;
+    }
+  }
+  return normalized;
+}
+
+function ensurePayloadStorageSchema(targetDb = db) {
+  if (!targetDb) {
+    return;
+  }
+
+  targetDb.exec(`
+    CREATE TABLE IF NOT EXISTS bvl_api_payloads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT NOT NULL,
+      key TEXT NOT NULL,
+      primary_ref TEXT,
+      secondary_ref TEXT,
+      tertiary_ref TEXT,
+      payload_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bvl_api_payloads_endpoint
+      ON bvl_api_payloads(endpoint);
+    CREATE INDEX IF NOT EXISTS idx_bvl_api_payloads_key_primary
+      ON bvl_api_payloads(key, primary_ref);
+    CREATE INDEX IF NOT EXISTS idx_bvl_api_payloads_secondary
+      ON bvl_api_payloads(key, secondary_ref);
+    CREATE INDEX IF NOT EXISTS idx_bvl_api_payloads_primary
+      ON bvl_api_payloads(primary_ref);
+  `);
+
+  const version = targetDb.selectValue("PRAGMA user_version") || 0;
+  if (version < 3) {
+    targetDb.exec("PRAGMA user_version = 3");
+  }
+}
+
 // Message handler
 self.onmessage = async function (event) {
   const { id, action, payload } = event.data;
@@ -354,6 +435,19 @@ async function applySchema() {
     } catch (error) {
       db.exec("ROLLBACK");
       console.error("Migration to version 2 failed:", error);
+      throw error;
+    }
+  }
+
+  if (currentVersion < 3) {
+    console.log("Migrating database to version 3...");
+    db.exec("BEGIN TRANSACTION");
+    try {
+      ensurePayloadStorageSchema(db);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      console.error("Migration to version 3 failed:", error);
       throw error;
     }
   }
@@ -860,9 +954,12 @@ async function importBvlDataset(payload) {
     awg_wartezeit,
     culturesLookup,
     pestsLookup,
+    apiPayloads = [],
+    payloadCounts = {},
   } = payload;
   const debug = payload.debug || false;
 
+  ensurePayloadStorageSchema();
   db.exec("BEGIN TRANSACTION");
 
   try {
@@ -876,6 +973,7 @@ async function importBvlDataset(payload) {
       DELETE FROM bvl_mittel;
       DELETE FROM bvl_lookup_kultur;
       DELETE FROM bvl_lookup_schadorg;
+      DELETE FROM bvl_api_payloads;
     `);
 
     let counts = {};
@@ -1065,6 +1163,37 @@ async function importBvlDataset(payload) {
         console.debug(`Imported ${pestsLookup.length} lookup_schadorg`);
     }
 
+    if (apiPayloads && apiPayloads.length > 0) {
+      const stmt = db.prepare(
+        `
+        INSERT INTO bvl_api_payloads
+        (endpoint, key, primary_ref, secondary_ref, tertiary_ref, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `
+      );
+
+      for (const item of apiPayloads) {
+        stmt
+          .bind([
+            item.endpoint,
+            item.key || item.endpoint,
+            item.primary_ref || null,
+            item.secondary_ref || null,
+            item.tertiary_ref || null,
+            item.payload_json,
+          ])
+          .step();
+        stmt.reset();
+      }
+      stmt.finalize();
+      counts.api_payloads = apiPayloads.length;
+      if (payloadCounts && typeof payloadCounts === "object") {
+        counts.payload_breakdown = payloadCounts;
+      }
+      if (debug)
+        console.debug(`Imported ${apiPayloads.length} generic payload rows`);
+    }
+
     db.exec("COMMIT");
     return { success: true, counts };
   } catch (error) {
@@ -1079,7 +1208,7 @@ async function importBvlSqlite(payload) {
   if (!sqlite3) throw new Error("SQLite not initialized");
 
   const { data, manifest } = payload;
-  
+
   if (!data || !(data instanceof Uint8Array || data instanceof Array)) {
     throw new Error("Invalid data: expected Uint8Array or Array");
   }
@@ -1088,7 +1217,7 @@ async function importBvlSqlite(payload) {
 
   // Create a temporary in-memory database with the imported data
   const remoteDb = new sqlite3.oo1.DB();
-  
+
   // Deserialize the database
   const scope = sqlite3.wasm.scopedAllocPush();
   try {
@@ -1126,7 +1255,35 @@ async function importBvlSqlite(payload) {
     },
   });
 
-  console.log(`Found ${bvlTables.length} BVL tables in remote database:`, bvlTables);
+  const tablePriority = {
+    bvl_meta: 10,
+    bvl_lookup_kultur: 20,
+    bvl_lookup_schadorg: 20,
+    bvl_mittel: 30,
+    bvl_awg: 40,
+    bvl_awg_kultur: 50,
+    bvl_awg_schadorg: 50,
+    bvl_awg_aufwand: 60,
+    bvl_awg_wartezeit: 60,
+  };
+
+  bvlTables.sort((a, b) => {
+    const pa = Object.prototype.hasOwnProperty.call(tablePriority, a)
+      ? tablePriority[a]
+      : 1000;
+    const pb = Object.prototype.hasOwnProperty.call(tablePriority, b)
+      ? tablePriority[b]
+      : 1000;
+    if (pa !== pb) {
+      return pa - pb;
+    }
+    return a.localeCompare(b);
+  });
+
+  console.log(
+    `Found ${bvlTables.length} BVL tables in remote database:`,
+    bvlTables
+  );
 
   // Begin transaction on main database
   db.exec("BEGIN TRANSACTION");
@@ -1175,13 +1332,12 @@ async function importBvlSqlite(payload) {
           console.log(`Creating table ${tableName}`);
           db.exec(createSql);
         } else {
-          console.warn(`Could not get CREATE statement for ${tableName}, skipping`);
+          console.warn(
+            `Could not get CREATE statement for ${tableName}, skipping`
+          );
           continue;
         }
       }
-
-      // Delete existing data from main table
-      db.exec(`DELETE FROM ${tableName}`);
 
       // Get columns that exist in main table
       const mainColumns = [];
@@ -1194,82 +1350,75 @@ async function importBvlSqlite(payload) {
 
       // Find common columns
       const commonColumns = columns.filter((col) => mainColumns.includes(col));
-      
+
       if (commonColumns.length === 0) {
-        console.warn(`No common columns between remote and main ${tableName}, skipping`);
+        console.warn(
+          `No common columns between remote and main ${tableName}, skipping`
+        );
         continue;
       }
 
       const colList = commonColumns.join(", ");
 
-      // Attach remote database
-      db.exec(`ATTACH DATABASE ':memory:' AS remote`);
-      
-      // Copy the remote database into the attached database
-      const remoteCopy = new sqlite3.oo1.DB(":memory:");
-      const remoteExport = sqlite3.capi.sqlite3_js_db_export(remoteDb.pointer);
-      
-      const scope2 = sqlite3.wasm.scopedAllocPush();
-      try {
-        const pData2 = sqlite3.wasm.allocFromTypedArray(remoteExport);
-        const pSchema2 = sqlite3.wasm.allocCString("main");
-        const flags2 =
-          (sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE || 0) |
-          (sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE || 0);
-        const rc2 = sqlite3.capi.sqlite3_deserialize(
-          remoteCopy.pointer,
-          pSchema2,
-          pData2,
-          remoteExport.byteLength,
-          remoteExport.byteLength,
-          flags2
-        );
-        if (rc2 !== sqlite3.capi.SQLITE_OK) {
-          throw new Error(`Failed to copy remote database: ${rc2}`);
-        }
-      } finally {
-        sqlite3.wasm.scopedAllocPop(scope2);
-      }
-
-      // Instead of ATTACH, let's copy data row by row
-      const rows = [];
-      remoteDb.exec({
-        sql: `SELECT ${colList} FROM ${tableName}`,
+      let hasForeignKey = 0;
+      db.exec({
+        sql: `SELECT COUNT(*) FROM pragma_foreign_key_list('${tableName}')`,
         callback: (row) => {
-          rows.push([...row]);
+          hasForeignKey = Number(row[0]) || 0;
         },
       });
 
-      if (rows.length > 0) {
-        const placeholders = commonColumns.map(() => "?").join(", ");
-        const insertSql = `INSERT OR REPLACE INTO ${tableName} (${colList}) VALUES (${placeholders})`;
-        const stmt = db.prepare(insertSql);
-
-        for (const row of rows) {
-          stmt.bind(row).step();
-          stmt.reset();
-        }
-        stmt.finalize();
-
-        counts[tableName] = rows.length;
-        console.log(`Imported ${rows.length} rows into ${tableName}`);
-      } else {
-        counts[tableName] = 0;
+      if (hasForeignKey > 0) {
+        db.exec("PRAGMA defer_foreign_keys = ON");
       }
 
-      remoteCopy.close();
+      try {
+        db.exec(`DELETE FROM ${tableName}`);
+
+        // Copy data row by row from remote database
+        const rows = [];
+        remoteDb.exec({
+          sql: `SELECT ${colList} FROM ${tableName}`,
+          callback: (row) => {
+            rows.push([...row]);
+          },
+        });
+
+        if (rows.length > 0) {
+          const placeholders = commonColumns.map(() => "?").join(", ");
+          const insertSql = `INSERT OR REPLACE INTO ${tableName} (${colList}) VALUES (${placeholders})`;
+          const stmt = db.prepare(insertSql);
+
+          for (const row of rows) {
+            stmt.bind(row).step();
+            stmt.reset();
+          }
+          stmt.finalize();
+
+          counts[tableName] = rows.length;
+          console.log(`Imported ${rows.length} rows into ${tableName}`);
+        } else {
+          counts[tableName] = 0;
+        }
+      } finally {
+        if (hasForeignKey > 0) {
+          db.exec("PRAGMA defer_foreign_keys = OFF");
+        }
+      }
     }
 
     // Update metadata from manifest
     if (manifest) {
       const metaUpdates = {
-        dataSource: `pflanzenschutz-db@${manifest.version}`,
+        dataSource: `pflanzenschutzliste-data@${manifest.version}`,
         lastSyncIso: new Date().toISOString(),
         lastSyncHash: manifest.hash || manifest.version,
       };
 
-      if (manifest.tables) {
-        metaUpdates.lastSyncCounts = JSON.stringify(manifest.tables);
+      if (manifest.counts || manifest.tables) {
+        metaUpdates.lastSyncCounts = JSON.stringify(
+          manifest.counts || manifest.tables || {}
+        );
       }
 
       if (manifest.api_version) {
@@ -1283,7 +1432,10 @@ async function importBvlSqlite(payload) {
       );
       for (const [key, value] of Object.entries(metaUpdates)) {
         metaStmt
-          .bind([key, typeof value === "string" ? value : JSON.stringify(value)])
+          .bind([
+            key,
+            typeof value === "string" ? value : JSON.stringify(value),
+          ])
           .step();
         metaStmt.reset();
       }
@@ -1379,7 +1531,7 @@ async function listBvlSyncLog(payload) {
 async function queryZulassung(payload) {
   if (!db) throw new Error("Database not initialized");
 
-  const { culture, pest, text, includeExpired, bioOnly } = payload || {};
+  const { culture, pest, text, includeExpired } = payload || {};
 
   let sql = `
     SELECT DISTINCT
@@ -1397,20 +1549,6 @@ async function queryZulassung(payload) {
 
   const conditions = [];
   const bindings = [];
-
-  // Check if extras table exists for bio filtering
-  let extrasTableExists = false;
-  if (bioOnly) {
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-      callback: () => { extrasTableExists = true; },
-    });
-    
-    if (extrasTableExists) {
-      sql += ` LEFT JOIN bvl_mittel_extras e ON m.kennr = e.kennr `;
-      conditions.push("(e.is_bio = 1 OR e.is_oeko = 1)");
-    }
-  }
 
   if (culture) {
     sql += ` JOIN bvl_awg_kultur ak ON a.awg_id = ak.awg_id `;
@@ -1471,6 +1609,78 @@ async function queryZulassung(payload) {
   sql += " ORDER BY m.name";
 
   const results = [];
+
+  const payloadCache = new Map();
+  const addressCache = new Map();
+
+  const normalizeRef = (value) => {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const str = String(value).trim();
+    return str === "" ? null : str;
+  };
+
+  const getPayloadsForKey = (
+    key,
+    { primaryRef = null, secondaryRef = null } = {}
+  ) => {
+    const normalizedPrimary = normalizeRef(primaryRef);
+    const normalizedSecondary = normalizeRef(secondaryRef);
+    const cacheKey = `${key}|${normalizedPrimary ?? ""}|${normalizedSecondary ?? ""}`;
+    if (payloadCache.has(cacheKey)) {
+      return payloadCache.get(cacheKey);
+    }
+
+    const payloads = [];
+    db.exec({
+      sql: `
+        SELECT payload_json, primary_ref, secondary_ref, tertiary_ref
+        FROM bvl_api_payloads
+        WHERE key = ?
+          AND (? IS NULL OR primary_ref = ?)
+          AND (? IS NULL OR secondary_ref = ?)
+        ORDER BY id
+      `,
+      bind: [
+        key,
+        normalizedPrimary,
+        normalizedPrimary,
+        normalizedSecondary,
+        normalizedSecondary,
+      ],
+      callback: (row) => {
+        const payload = normalizePayloadRecord(safeParseJson(row[0]) || {});
+        payload.__meta = {
+          primary_ref: row[1],
+          secondary_ref: row[2],
+          tertiary_ref: row[3],
+        };
+        payloads.push(payload);
+      },
+    });
+
+    payloadCache.set(cacheKey, payloads);
+    return payloads;
+  };
+
+  const getFirstPayload = (key, refs = {}) => {
+    const list = getPayloadsForKey(key, refs);
+    return list.length > 0 ? list[0] : null;
+  };
+
+  const getAdresseByNumber = (adresseNr) => {
+    const normalized = normalizeRef(adresseNr);
+    if (!normalized) {
+      return null;
+    }
+    if (addressCache.has(normalized)) {
+      return addressCache.get(normalized);
+    }
+    const payload = getFirstPayload("adresse", { primaryRef: normalized });
+    addressCache.set(normalized, payload);
+    return payload;
+  };
 
   db.exec({
     sql,
@@ -1585,111 +1795,114 @@ async function queryZulassung(payload) {
       },
     });
 
-    // Get wirkstoffe (if table exists)
-    result.wirkstoffe = [];
-    let wirkstoffeTableExists = false;
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_wirkstoffe'",
-      callback: () => { wirkstoffeTableExists = true; },
+    result.wirkstoffe = getPayloadsForKey("wirkstoff", {
+      primaryRef: result.kennr,
     });
-    if (wirkstoffeTableExists) {
-      db.exec({
-        sql: "SELECT * FROM bvl_mittel_wirkstoffe WHERE kennr = ?",
-        bind: [result.kennr],
-        callback: (row) => {
-          // Store all columns dynamically
-          const wirkstoff = {};
-          const colNames = db.exec({
-            sql: "PRAGMA table_info(bvl_mittel_wirkstoffe)",
-            returnValue: "resultRows"
-          });
-          colNames.forEach((col, idx) => {
-            wirkstoff[col[1]] = row[idx];
-          });
-          result.wirkstoffe.push(wirkstoff);
-        },
-      });
-    }
+    result.wirkstoff_gehalt = getPayloadsForKey("wirkstoff_gehalt", {
+      primaryRef: result.kennr,
+    });
+    result.zusatzstoffe = getPayloadsForKey("zusatzstoff", {
+      primaryRef: result.kennr,
+    });
+    result.zusatzstoff_vertrieb = getPayloadsForKey("zusatzstoff_vertrieb", {
+      primaryRef: result.kennr,
+    });
+    result.parallelimporte_gueltig = getPayloadsForKey(
+      "parallelimport_gueltig",
+      {
+        primaryRef: result.kennr,
+      }
+    );
+    result.parallelimporte_abgelaufen = getPayloadsForKey(
+      "parallelimport_abgelaufen",
+      { primaryRef: result.kennr }
+    );
+    result.staerkung = getPayloadsForKey("staerkung", {
+      primaryRef: result.kennr,
+    });
+    result.staerkung_vertrieb = getPayloadsForKey("staerkung_vertrieb", {
+      primaryRef: result.kennr,
+    });
 
-    // Get gefahrhinweise (if table exists)
-    result.gefahrhinweise = [];
-    let gefahrTableExists = false;
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_gefahrhinweise'",
-      callback: () => { gefahrTableExists = true; },
+    const vertriebseintraege = getPayloadsForKey("mittel_vertrieb", {
+      primaryRef: result.kennr,
+    }).map((payload) => {
+      const adresseNr =
+        getFieldValue(payload, "adresse_nr") ||
+        getFieldValue(payload, "vertriebsfirma_nr") ||
+        getFieldValue(payload, "vertriebsfirma_adresse_nr") ||
+        getFieldValue(payload, "hersteller_nr") ||
+        getFieldValue(payload, "hersteller_adresse_nr") ||
+        getFieldValue(payload, "zulassungsinhaber_adresse_nr") ||
+        getFieldValue(payload, "zulassungsinhaber_nr") ||
+        null;
+      const adresse = getAdresseByNumber(adresseNr);
+      const enriched = { ...payload };
+      if (adresse) {
+        enriched.adresse = adresse;
+        enriched.adresse_nr =
+          adresseNr !== null && adresseNr !== undefined ? adresseNr : null;
+      }
+      return enriched;
     });
-    if (gefahrTableExists) {
-      db.exec({
-        sql: "SELECT * FROM bvl_mittel_gefahrhinweise WHERE kennr = ?",
-        bind: [result.kennr],
-        callback: (row) => {
-          const gefahr = {};
-          const colNames = db.exec({
-            sql: "PRAGMA table_info(bvl_mittel_gefahrhinweise)",
-            returnValue: "resultRows"
-          });
-          colNames.forEach((col, idx) => {
-            gefahr[col[1]] = row[idx];
-          });
-          result.gefahrhinweise.push(gefahr);
-        },
-      });
-    }
+    result.vertrieb = vertriebseintraege;
 
-    // Get vertrieb/hersteller (if table exists)
-    result.vertrieb = [];
-    let vertriebTableExists = false;
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_vertrieb'",
-      callback: () => { vertriebTableExists = true; },
+    result.gefahrhinweise = getPayloadsForKey("ghs_gefahrenhinweise", {
+      primaryRef: result.kennr,
     });
-    if (vertriebTableExists) {
-      db.exec({
-        sql: "SELECT * FROM bvl_mittel_vertrieb WHERE kennr = ?",
-        bind: [result.kennr],
-        callback: (row) => {
-          const vert = {};
-          const colNames = db.exec({
-            sql: "PRAGMA table_info(bvl_mittel_vertrieb)",
-            returnValue: "resultRows"
-          });
-          colNames.forEach((col, idx) => {
-            vert[col[1]] = row[idx];
-          });
-          result.vertrieb.push(vert);
-        },
-      });
-    }
+    result.gefahrensymbole = getPayloadsForKey("ghs_gefahrensymbole", {
+      primaryRef: result.kennr,
+    });
+    result.sicherheitshinweise = getPayloadsForKey("ghs_sicherheitshinweise", {
+      primaryRef: result.kennr,
+    });
+    result.signalwoerter = getPayloadsForKey("ghs_signalwoerter", {
+      primaryRef: result.kennr,
+    });
+    result.hinweise = getPayloadsForKey("hinweis", {
+      primaryRef: result.kennr,
+    });
 
-    // Check for extras/flags (bio, öko, etc.) if table exists
-    result.is_bio = false;
-    result.is_oeko = false;
-    result.certification_body = null;
-    let extrasTableExists = false;
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-      callback: () => { extrasTableExists = true; },
+    result.antraege = getPayloadsForKey("antrag", { primaryRef: result.kennr });
+
+    const auflagenPayloads = [
+      ...getPayloadsForKey("auflagen", { primaryRef: result.kennr }),
+      ...getPayloadsForKey("auflagen", { secondaryRef: result.awg_id }),
+    ];
+
+    result.auflagen = auflagenPayloads.map((auflage) => {
+      const nummer = getFieldValue(auflage, "auflagenr");
+      const reduzierungen = nummer
+        ? getPayloadsForKey("auflage_redu", { primaryRef: nummer })
+        : [];
+      return {
+        ...auflage,
+        reduzierung: reduzierungen,
+      };
     });
-    if (extrasTableExists) {
-      db.exec({
-        sql: "SELECT * FROM bvl_mittel_extras WHERE kennr = ?",
-        bind: [result.kennr],
-        callback: (row) => {
-          result.extras = {};
-          const colNames = db.exec({
-            sql: "PRAGMA table_info(bvl_mittel_extras)",
-            returnValue: "resultRows"
-          });
-          colNames.forEach((col, idx) => {
-            result.extras[col[1]] = row[idx];
-          });
-          // Extract common bio fields
-          if (result.extras.is_bio) result.is_bio = !!result.extras.is_bio;
-          if (result.extras.is_oeko) result.is_oeko = !!result.extras.is_oeko;
-          if (result.extras.certification_body) result.certification_body = result.extras.certification_body;
-        },
-      });
-    }
+
+    result.awg_bemerkungen = getPayloadsForKey("awg_bem", {
+      primaryRef: result.awg_id,
+    });
+    result.awg_partner = getPayloadsForKey("awg_partner", {
+      primaryRef: result.awg_id,
+    });
+    result.awg_partner_aufwand = getPayloadsForKey("awg_partner_aufwand", {
+      primaryRef: result.awg_id,
+    });
+    result.awg_verwendungszwecke = getPayloadsForKey("awg_verwendungszweck", {
+      primaryRef: result.awg_id,
+    });
+    result.awg_wartezeit_ausnahmen = getPayloadsForKey(
+      "awg_wartezeit_ausg_kultur",
+      { primaryRef: result.awg_id }
+    );
+    result.awg_zeitpunkte = getPayloadsForKey("awg_zeitpunkt", {
+      primaryRef: result.awg_id,
+    });
+    result.awg_zulassung = getPayloadsForKey("awg_zulassung", {
+      primaryRef: result.awg_id,
+    });
   }
 
   return results;

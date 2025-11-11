@@ -38,7 +38,6 @@ export interface AppState {
       pest: string | null;
       text: string;
       includeExpired: boolean;
-      bioOnly: boolean;
     };
     results: any[];
     lastSync: string | null;
@@ -115,7 +114,6 @@ let state: AppState = {
       pest: null,
       text: "",
       includeExpired: false,
-      bioOnly: false,
     },
     results: [],
     lastSync: null,
@@ -232,7 +230,6 @@ export function resetState(newState?: AppState): AppState {
         pest: null,
         text: "",
         includeExpired: false,
-        bioOnly: false,
       },
       results: [],
       lastSync: null,
