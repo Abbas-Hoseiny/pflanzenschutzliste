@@ -1,7 +1,6 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Shell from '../components/Shell.astro';
-import indexScript from '@scripts/pages/indexClient.ts?url';
 ---
 
 <BaseLayout title="Pflanzenschutz">
@@ -46,8 +45,6 @@ import indexScript from '@scripts/pages/indexClient.ts?url';
       </div>
     </div>
   </main>
-  
-  <script type="module" src={indexScript}></script>
   
   <style>
     .main-content {

@@ -10,6 +10,18 @@ export default defineConfig({
     inlineStylesheets: "auto",
     assets: "_astro",
   },
+  integrations: [
+    {
+      name: "legacy-script-loader",
+      hooks: {
+        "astro:config:setup"({ injectScript }) {
+          injectScript("page", "import '@/scripts/main.ts';");
+          injectScript("page", "import '@/scripts/components/shellClient.ts';");
+          injectScript("page", "import '@/scripts/pages/indexClient.ts';");
+        },
+      },
+    },
+  ],
   vite: {
     resolve: {
       alias: {
@@ -23,6 +35,7 @@ export default defineConfig({
       },
     },
     build: {
+      assetsInlineLimit: 0,
       rollupOptions: {
         output: {
           manualChunks: {
