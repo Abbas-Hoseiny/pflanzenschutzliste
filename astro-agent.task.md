@@ -3,13 +3,15 @@
 ## Kontext
 
 Lies zuerst die folgenden Analysedokumente:
+
 - **ARCHITEKTUR.md** - Vollständige Ist-Architektur
 - **PERFORMANCE.md** - Performance-Probleme und Metriken
 - **ASTRO-MIGRATION.md** - Migrations-Strategie und Vorteile
 
 **Projektziel:** Migration der bestehenden Vanilla-JS Single-Page-App zu Astro 4 für:
+
 - 86% weniger JavaScript zum Client
-- 64% schnellere Load Time  
+- 64% schnellere Load Time
 - Moderne Developer Experience (TypeScript, HMR)
 - Automatische Optimierungen (Code-Splitting, Minification)
 - GitHub Pages Deployment mit GitHub Actions
@@ -153,29 +155,29 @@ npm run dev
 
 ```javascript
 // astro.config.mjs
-import { defineConfig } from 'astro/config';
+import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: 'https://abbas-hoseiny.github.io',
-  base: '/pflanzenschutzliste',
-  output: 'static',
+  site: "https://abbas-hoseiny.github.io",
+  base: "/pflanzenschutzliste",
+  output: "static",
   build: {
-    inlineStylesheets: 'auto',
-    assets: '_astro'
+    inlineStylesheets: "auto",
+    assets: "_astro",
   },
   vite: {
     build: {
       rollupOptions: {
         output: {
           manualChunks: {
-            'sqlite': ['./src/scripts/core/storage/sqlite'],
-            'bvl': ['./src/scripts/core/bvlSync'],
-            'vendor': ['./src/scripts/core/bootstrap']
-          }
-        }
-      }
-    }
-  }
+            sqlite: ["./src/scripts/core/storage/sqlite"],
+            bvl: ["./src/scripts/core/bvlSync"],
+            vendor: ["./src/scripts/core/bootstrap"],
+          },
+        },
+      },
+    },
+  },
 });
 ```
 
@@ -205,19 +207,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Build with Astro
         run: npm run build
-      
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -269,6 +271,7 @@ jobs:
 ```
 
 **Acceptance Criteria:**
+
 - ✅ `npm run dev` startet Dev-Server
 - ✅ `npm run build` generiert `dist/` Ordner
 - ✅ GitHub Actions Workflow ist konfiguriert
@@ -298,7 +301,7 @@ const { title = 'Pflanzenschutz' } = Astro.props;
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{title}</title>
-  
+
   <!-- Bootstrap CDN (wie bisher) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" />
@@ -310,14 +313,14 @@ const { title = 'Pflanzenschutz' } = Astro.props;
       Diese Anwendung benötigt JavaScript.
     </div>
   </noscript>
-  
+
   <div id="app-root" class="app-root">
     <slot />
   </div>
-  
+
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  
+
   <!-- Starfield Animation -->
   <script>
     import { initStarfield } from '../scripts/features/starfield';
@@ -340,11 +343,11 @@ const { title = 'Pflanzenschutz' } = Astro.props;
       <a class="navbar-brand" href="#">
         <i class="bi bi-leaf-fill"></i> Pflanzenschutz
       </a>
-      
+
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
         <span class="navbar-toggler-icon"></span>
       </button>
-      
+
       <div class="collapse navbar-collapse" id="navbarNav">
         <ul class="navbar-nav ms-auto">
           <li class="nav-item">
@@ -386,23 +389,23 @@ const { title = 'Pflanzenschutz' } = Astro.props;
 
 <script>
   import { emit } from '@scripts/core/eventBus';
-  
+
   document.addEventListener('DOMContentLoaded', () => {
     const buttons = document.querySelectorAll('.nav-btn');
-    
+
     buttons.forEach(button => {
       button.addEventListener('click', (e) => {
         const section = (e.currentTarget as HTMLElement).dataset.section;
-        
+
         // Active-State setzen
         buttons.forEach(btn => btn.classList.remove('active'));
         button.classList.add('active');
-        
+
         // Event emittieren
         emit('app:sectionChanged', section);
       });
     });
-    
+
     // Initial: Berechnung aktiv
     buttons[0]?.classList.add('active');
   });
@@ -415,16 +418,16 @@ const { title = 'Pflanzenschutz' } = Astro.props;
     z-index: 1000;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
   }
-  
+
   .nav-btn {
     margin: 0 0.25rem;
   }
-  
+
   .nav-btn.active {
     background-color: var(--color-accent);
     border-color: var(--color-accent);
   }
-  
+
   .footer {
     position: fixed;
     bottom: 0;
@@ -444,6 +447,7 @@ cp assets/css/*.css src/styles/
 ```
 
 **Acceptance Criteria:**
+
 - ✅ Layout rendert korrekt
 - ✅ Navigation funktioniert (Events)
 - ✅ Starfield-Animation läuft
@@ -457,7 +461,7 @@ cp assets/css/*.css src/styles/
 
 ```typescript
 // src/scripts/core/state.ts
-import { getDefaultFieldLabels } from './labels';
+import { getDefaultFieldLabels } from "./labels";
 
 export interface AppState {
   app: {
@@ -465,8 +469,8 @@ export interface AppState {
     version: string | null;
     hasFileAccess: boolean;
     hasDatabase: boolean;
-    activeSection: 'calc' | 'history' | 'zulassung' | 'settings' | 'reporting';
-    storageDriver: 'memory' | 'sqlite' | 'filesystem' | 'localstorage';
+    activeSection: "calc" | "history" | "zulassung" | "settings" | "reporting";
+    storageDriver: "memory" | "sqlite" | "filesystem" | "localstorage";
   };
   company: {
     name: string;
@@ -497,7 +501,6 @@ export interface AppState {
       pest: string | null;
       text: string;
       includeExpired: boolean;
-      bioOnly: boolean;
     };
     results: any[];
     lastSync: string | null;
@@ -558,7 +561,7 @@ function notify(prevState: AppState): void {
     try {
       listener(state, prevState);
     } catch (err) {
-      console.error('state listener error', err);
+      console.error("state listener error", err);
     }
   }
 }
@@ -572,15 +575,18 @@ export function patchState(patch: Partial<AppState>): AppState {
 
 export function updateSlice<K extends keyof AppState>(
   sliceKey: K,
-  updater: ((current: AppState[K], state: AppState) => AppState[K]) | AppState[K]
+  updater:
+    | ((current: AppState[K], state: AppState) => AppState[K])
+    | AppState[K]
 ): AppState {
   const currentSlice = state[sliceKey];
-  const nextSlice = typeof updater === 'function' ? updater(currentSlice, state) : updater;
-  
+  const nextSlice =
+    typeof updater === "function" ? updater(currentSlice, state) : updater;
+
   if (nextSlice === currentSlice) {
     return state;
   }
-  
+
   return patchState({ [sliceKey]: nextSlice } as Partial<AppState>);
 }
 
@@ -598,7 +604,7 @@ const listeners = new Map<string, Set<EventHandler>>();
 export function emit<T = any>(eventName: string, payload?: T): void {
   const handlers = listeners.get(eventName);
   if (!handlers) return;
-  
+
   for (const handler of handlers) {
     try {
       handler(payload);
@@ -615,9 +621,9 @@ export function subscribe<T = any>(
   if (!listeners.has(eventName)) {
     listeners.set(eventName, new Set());
   }
-  
+
   listeners.get(eventName)!.add(handler);
-  
+
   return () => {
     listeners.get(eventName)?.delete(handler);
   };
@@ -634,6 +640,7 @@ export function unsubscribe<T = any>(
 #### 3.3 Weitere Core-Module
 
 **Reihenfolge:**
+
 1. `labels.ts` (einfach)
 2. `utils.ts` (einfach)
 3. `config.ts` (mittel)
@@ -650,12 +657,14 @@ export function unsubscribe<T = any>(
 14. `virtualList.ts` (mittel)
 
 **Wichtig:**
+
 - Bestehende Logik **nicht ändern**
 - Nur Typen hinzufügen
 - Fehlerbehandlung beibehalten
 - Tests schreiben (falls Zeit)
 
 **Acceptance Criteria:**
+
 - ✅ Alle Core-Module sind TypeScript
 - ✅ `sqliteWorker.js` funktioniert weiterhin
 - ✅ Keine Breaking Changes
@@ -701,12 +710,12 @@ const { defaults, fieldLabels } = state;
             </div>
             <!-- ... weitere Felder -->
           </div>
-          
+
           <button type="submit" class="btn btn-primary">
             <i class="bi bi-play-fill"></i> Berechnen
           </button>
         </form>
-        
+
         <div id="calculation-results" style="display: none;">
           <!-- Ergebnis-Anzeige -->
         </div>
@@ -719,10 +728,10 @@ const { defaults, fieldLabels } = state;
   // Client-seitige Logik aus features/calculation/index.js übernehmen
   import { getState, subscribeState } from '@scripts/core/state';
   import { performCalculation } from '@scripts/features/calculation/logic';
-  
+
   const form = document.getElementById('calculation-form') as HTMLFormElement;
   const resultsDiv = document.getElementById('calculation-results');
-  
+
   // Section-Visibility Management
   subscribeState((state) => {
     const section = document.querySelector('[data-section="calc"]') as HTMLElement;
@@ -732,12 +741,12 @@ const { defaults, fieldLabels } = state;
       section.style.display = 'none';
     }
   });
-  
+
   // Form-Submit
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(form);
-    
+
     try {
       const result = await performCalculation(formData);
       displayResults(result);
@@ -746,7 +755,7 @@ const { defaults, fieldLabels } = state;
       alert('Fehler bei der Berechnung');
     }
   });
-  
+
   function displayResults(result: any) {
     // Rendering-Logik aus bestehendem Code
     if (resultsDiv) {
@@ -774,6 +783,7 @@ export async function performCalculation(formData: FormData): Promise<any> {
 ```
 
 **Analog für:**
+
 - `History.astro` (Tag 13-14)
 - `Settings.astro` (Tag 15)
 - `Reporting.astro` (Tag 16-17)
@@ -800,7 +810,7 @@ import SyncSection from './SyncSection.astro';
 
 <script>
   import { subscribeState } from '@scripts/core/state';
-  
+
   subscribeState((state) => {
     const section = document.querySelector('[data-section="zulassung"]') as HTMLElement;
     section.style.display = state.app.activeSection === 'zulassung' ? 'block' : 'none';
@@ -833,14 +843,6 @@ import SyncSection from './SyncSection.astro';
         <label class="form-label">Suchtext</label>
         <input type="text" class="form-control" id="filter-text" />
       </div>
-      <div class="col-md-3">
-        <div class="form-check mt-4">
-          <input class="form-check-input" type="checkbox" id="filter-bio" />
-          <label class="form-check-label" for="filter-bio">
-            <i class="bi bi-leaf-fill text-success"></i> Nur Bio/Öko
-          </label>
-        </div>
-      </div>
     </div>
     <div class="mt-3">
       <button class="btn btn-primary" id="btn-search">
@@ -853,16 +855,15 @@ import SyncSection from './SyncSection.astro';
 <script>
   import { updateSlice } from '@scripts/core/state';
   import { emit } from '@scripts/core/eventBus';
-  
+
   // Filter-Logik aus zulassung/index.js
   document.getElementById('btn-search')?.addEventListener('click', () => {
     const filters = {
       culture: (document.getElementById('filter-culture') as HTMLSelectElement).value || null,
       pest: (document.getElementById('filter-pest') as HTMLSelectElement).value || null,
-      text: (document.getElementById('filter-text') as HTMLInputElement).value,
-      bioOnly: (document.getElementById('filter-bio') as HTMLInputElement).checked
+      text: (document.getElementById('filter-text') as HTMLInputElement).value
     };
-    
+
     updateSlice('zulassung', (z) => ({ ...z, filters }));
     emit('zulassung:search', filters);
   });
@@ -870,11 +871,13 @@ import SyncSection from './SyncSection.astro';
 ```
 
 **Weitere Sub-Komponenten:**
+
 - `SyncSection.astro` - BVL-Sync UI
 - `ResultList.astro` - Ergebnis-Liste mit Virtual Scrolling
 - `DetailCard.astro` - Detail-Ansicht
 
 **Acceptance Criteria:**
+
 - ✅ Alle Features funktionieren wie vorher
 - ✅ UI ist identisch (oder besser)
 - ✅ Keine Funktionalitäts-Regression
@@ -894,35 +897,35 @@ export default defineConfig({
         output: {
           manualChunks(id) {
             // Vendor-Code
-            if (id.includes('node_modules')) {
-              return 'vendor';
+            if (id.includes("node_modules")) {
+              return "vendor";
             }
-            
+
             // Storage-Layer (lazy)
-            if (id.includes('storage/sqlite')) {
-              return 'sqlite';
+            if (id.includes("storage/sqlite")) {
+              return "sqlite";
             }
-            
+
             // BVL-Features (lazy)
-            if (id.includes('bvlSync') || id.includes('bvlDataset')) {
-              return 'bvl';
+            if (id.includes("bvlSync") || id.includes("bvlDataset")) {
+              return "bvl";
             }
-            
+
             // Features (lazy)
-            if (id.includes('features/zulassung')) {
-              return 'zulassung';
+            if (id.includes("features/zulassung")) {
+              return "zulassung";
             }
-            if (id.includes('features/calculation')) {
-              return 'calculation';
+            if (id.includes("features/calculation")) {
+              return "calculation";
             }
-            if (id.includes('features/history')) {
-              return 'history';
+            if (id.includes("features/history")) {
+              return "history";
             }
-          }
-        }
-      }
-    }
-  }
+          },
+        },
+      },
+    },
+  },
 });
 ```
 
@@ -942,15 +945,15 @@ import Reporting from '@/components/Reporting.astro';
 
 <BaseLayout>
   <Shell client:load />
-  
+
   <main data-region="main">
     <!-- Critical: Sofort laden -->
     <Calculation client:load />
-    
+
     <!-- Important: Bei Idle laden -->
     <History client:idle />
     <Settings client:idle />
-    
+
     <!-- Heavy: Bei Sichtbarkeit laden -->
     <Zulassung client:visible />
     <Reporting client:visible />
@@ -967,12 +970,14 @@ npx vite-bundle-visualizer dist/stats.html
 ```
 
 **Ziel:**
+
 - Initial Bundle: < 50 KB (JS)
 - Zulassung-Chunk: < 40 KB
 - Sqlite-Chunk: < 50 KB
 - Gesamt (alle geladen): < 200 KB
 
 **Acceptance Criteria:**
+
 - ✅ Code-Splitting funktioniert
 - ✅ Lazy-Loading reduziert Initial-Load
 - ✅ Bundle-Größen im Zielbereich
@@ -983,23 +988,25 @@ npx vite-bundle-visualizer dist/stats.html
 
 ```typescript
 // src/scripts/core/state.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { getState, patchState, subscribeState } from './state';
+import { describe, it, expect, beforeEach } from "vitest";
+import { getState, patchState, subscribeState } from "./state";
 
-describe('State Management', () => {
-  it('should return initial state', () => {
+describe("State Management", () => {
+  it("should return initial state", () => {
     const state = getState();
     expect(state.app.ready).toBe(false);
   });
-  
-  it('should update state', () => {
+
+  it("should update state", () => {
     patchState({ app: { ...getState().app, ready: true } });
     expect(getState().app.ready).toBe(true);
   });
-  
-  it('should notify subscribers', () => {
+
+  it("should notify subscribers", () => {
     let notified = false;
-    subscribeState(() => { notified = true; });
+    subscribeState(() => {
+      notified = true;
+    });
     patchState({ app: { ready: true } });
     expect(notified).toBe(true);
   });
@@ -1007,6 +1014,7 @@ describe('State Management', () => {
 ```
 
 **Test-Abdeckung:**
+
 - State Management
 - EventBus
 - Utils (formatAmount, escapeHtml, etc.)
@@ -1016,36 +1024,36 @@ describe('State Management', () => {
 
 ```typescript
 // tests/e2e/basic.spec.ts
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test('should load homepage', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('h1')).toBeVisible();
+test("should load homepage", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("h1")).toBeVisible();
 });
 
-test('should perform calculation', async ({ page }) => {
-  await page.goto('/');
-  
+test("should perform calculation", async ({ page }) => {
+  await page.goto("/");
+
   // Navigation
   await page.click('[data-section="calc"]');
-  
+
   // Formular ausfüllen
-  await page.fill('#creator', 'Test User');
-  await page.fill('#location', 'Test Farm');
-  
+  await page.fill("#creator", "Test User");
+  await page.fill("#location", "Test Farm");
+
   // Berechnen
   await page.click('button[type="submit"]');
-  
+
   // Ergebnis prüfen
-  await expect(page.locator('#calculation-results')).toBeVisible();
+  await expect(page.locator("#calculation-results")).toBeVisible();
 });
 
-test('should switch sections', async ({ page }) => {
-  await page.goto('/');
-  
+test("should switch sections", async ({ page }) => {
+  await page.goto("/");
+
   await page.click('[data-section="history"]');
   await expect(page.locator('[data-section="history"]')).toBeVisible();
-  
+
   await page.click('[data-section="zulassung"]');
   await expect(page.locator('[data-section="zulassung"]')).toBeVisible();
 });
@@ -1062,17 +1070,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
       - run: npm ci
-      
+
       # Tests ausführen
       - run: npm run test
-      
+
       # E2E-Tests
       - run: npx playwright install --with-deps
       - run: npm run test:e2e
-      
+
       # Build
       - run: npm run build
-      
+
       # Upload
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -1080,6 +1088,7 @@ jobs:
 ```
 
 **Acceptance Criteria:**
+
 - ✅ Unit-Tests laufen und passen
 - ✅ E2E-Tests validieren kritische Flows
 - ✅ CI-Pipeline ist grün
@@ -1088,7 +1097,7 @@ jobs:
 
 #### 7.1 README.md aktualisieren
 
-```markdown
+````markdown
 # Bio-Pflanzenschutz
 
 Moderne Web-Anwendung zur Verwaltung von Pflanzenschutzmitteln, gebaut mit Astro 4.
@@ -1120,6 +1129,7 @@ npm run preview
 npm run test
 npm run test:e2e
 ```
+````
 
 ## Deployment
 
@@ -1143,6 +1153,7 @@ Automatisches Deployment zu GitHub Pages via GitHub Actions bei Push zu `main`.
 ## Lizenz
 
 MIT License
+
 ```
 
 #### 7.2 MIGRATION.md erstellen
@@ -1249,3 +1260,4 @@ Bei Problemen oder Fragen:
 **Verbesserung:** -86% JavaScript, -64% Load Time
 
 Viel Erfolg bei der Migration! 🚀
+```

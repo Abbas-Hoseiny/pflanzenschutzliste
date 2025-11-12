@@ -164,6 +164,8 @@ function renderAufwandRow(aufwand: Record<string, any>): string {
 
   const mittelUnit = firstNonEmpty(
     aufwand.mittel_einheit,
+    aufwand.aufwandmenge_einheit,
+    aufwand.mittel_unit,
     payload.aufwandmenge_einheit,
     payload.m_aufwand_einheit,
     payload.max_aufwandmenge_einheit
@@ -171,6 +173,8 @@ function renderAufwandRow(aufwand: Record<string, any>): string {
 
   const mittelValue = firstNonEmpty(
     aufwand.mittel_menge,
+    aufwand.mittel_value,
+    aufwand.aufwandmenge,
     payload.m_aufwand,
     payload.max_aufwandmenge,
     payload.m_aufwand_bis,
@@ -179,10 +183,16 @@ function renderAufwandRow(aufwand: Record<string, any>): string {
   );
 
   const mittelFrom = firstNonEmpty(
+    aufwand.mittel_menge_min,
+    payload.mittel_menge_von,
+    payload.aufwandmenge_min,
     payload.m_aufwand_von,
     payload.max_aufwandmenge_von
   );
   const mittelTo = firstNonEmpty(
+    aufwand.mittel_menge_max,
+    payload.mittel_menge_bis,
+    payload.aufwandmenge_max,
     payload.m_aufwand_bis,
     payload.max_aufwandmenge_bis
   );
@@ -205,6 +215,7 @@ function renderAufwandRow(aufwand: Record<string, any>): string {
 
   const wasserUnit = firstNonEmpty(
     aufwand.wasser_einheit,
+    aufwand.wasser_unit,
     payload.wassermenge_einheit,
     payload.w_aufwand_einheit,
     payload.w_aufwand_von_einheit,
@@ -213,6 +224,8 @@ function renderAufwandRow(aufwand: Record<string, any>): string {
 
   const wasserValue = firstNonEmpty(
     aufwand.wasser_menge,
+    aufwand.wasser_value,
+    aufwand.wassermenge,
     payload.wassermenge,
     payload.w_aufwand,
     payload.w_aufwand_bis,
@@ -221,10 +234,16 @@ function renderAufwandRow(aufwand: Record<string, any>): string {
   );
 
   const wasserFrom = firstNonEmpty(
+    aufwand.wasser_menge_min,
+    payload.wasser_menge_von,
+    payload.wassermenge_min,
     payload.w_aufwand_von,
     payload.wassermenge_von
   );
   const wasserTo = firstNonEmpty(
+    aufwand.wasser_menge_max,
+    payload.wasser_menge_bis,
+    payload.wassermenge_max,
     payload.w_aufwand_bis,
     payload.wassermenge_bis
   );
@@ -358,14 +377,15 @@ async function loadInitialData(): Promise<void> {
       },
     }));
 
-    const [cultures, pests] = await Promise.all([
+    const [cultures, pests, mittel] = await Promise.all([
       storage.listBvlCultures(),
       storage.listBvlSchadorg(),
+      storage.listBvlMittel({ limit: 1000 }),
     ]);
 
     services.state.updateSlice("zulassung", (prev) => ({
       ...prev,
-      lookups: { cultures, pests },
+      lookups: { cultures, pests, mittel },
     }));
 
     renderIfVisible();
@@ -426,8 +446,6 @@ function renderStatusSection(zulassungState: ZulassungState): string {
   const apiStand = zulassungState.apiStand || null;
   const manifestVersion = zulassungState.manifestVersion || null;
   const lastSyncHash = zulassungState.lastSyncHash || null;
-  const bioCount =
-    counts.bvl_mittel_extras || counts.mittelExtras || counts.bio || 0;
   const totalMittel = counts.mittel || counts.bvl_mittel || 0;
 
   return `
@@ -442,11 +460,7 @@ function renderStatusSection(zulassungState: ZulassungState): string {
           ${lastSyncHash ? `<small class="text-muted">Hash: ${escapeHtml(lastSyncHash.substring(0, 12))}...</small><br>` : ""}
           <small class="mt-1 d-block">
             <i class="bi bi-database me-1"></i>
-            Mittel: ${totalMittel}${
-              bioCount > 0
-                ? ` <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-leaf-fill"></i> ${bioCount} Bio</span>`
-                : ""
-            }, Anwendungen: ${counts.awg || counts.bvl_awg || 0}, Kulturen: ${
+            Mittel: ${totalMittel}, Anwendungen: ${counts.awg || counts.bvl_awg || 0}, Kulturen: ${
               counts.awg_kultur || counts.bvl_awg_kultur || 0
             }, Schadorganismen: ${
               counts.awg_schadorg || counts.bvl_awg_schadorg || 0
@@ -567,6 +581,7 @@ function renderFilterSection(zulassungState: ZulassungState): string {
   const { filters, lookups, busy } = zulassungState;
   const cultures = Array.isArray(lookups.cultures) ? lookups.cultures : [];
   const pests = Array.isArray(lookups.pests) ? lookups.pests : [];
+  const mittelList = Array.isArray(lookups.mittel) ? lookups.mittel : [];
 
   return `
     <div class="card mb-3 filter-section">
@@ -578,7 +593,24 @@ function renderFilterSection(zulassungState: ZulassungState): string {
             <input type="search" id="filter-text" class="form-control" placeholder="Mittel, Kultur- oder Schaderreger-Name" value="${escapeHtml(filters.text || "")}">
             <small class="form-text text-muted">Durchsucht Mittelname, Kennnummer sowie Klartexte der Kulturen und Schadorganismen.</small>
           </div>
-          <div class="col-md-4">
+          <div class="col-12 col-md-6 col-lg-4">
+            <label for="filter-mittel" class="form-label">
+              <i class="bi bi-capsule me-1"></i>Mittel auswählen
+            </label>
+            <input type="search" id="filter-mittel" class="form-control" list="filter-mittel-options" placeholder="Name oder Zulassungsnummer" value="${escapeHtml(filters.mittel || "")}">
+            <datalist id="filter-mittel-options">
+              ${mittelList
+                .map((item: any) => {
+                  const labelName = item.name
+                    ? `${item.name} – ${item.kennr}`
+                    : item.kennr;
+                  return `<option value="${escapeHtml(item.kennr)}">${escapeHtml(labelName)}</option>`;
+                })
+                .join("")}
+            </datalist>
+            <small class="form-text text-muted">Tippen für Autovervollständigung; freie Texte filtern ebenso nach Mittelname.</small>
+          </div>
+          <div class="col-12 col-md-6 col-lg-4">
             <label for="filter-culture" class="form-label">
               <i class="bi bi-flower1 me-1"></i>Kultur
             </label>
@@ -594,7 +626,7 @@ function renderFilterSection(zulassungState: ZulassungState): string {
                 .join("")}
             </select>
           </div>
-          <div class="col-md-4">
+          <div class="col-12 col-md-6 col-lg-4">
             <label for="filter-pest" class="form-label">
               <i class="bi bi-bug me-1"></i>Schadorganismus
             </label>
@@ -609,16 +641,6 @@ function renderFilterSection(zulassungState: ZulassungState): string {
                 )
                 .join("")}
             </select>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label d-block">&nbsp;</label>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="filter-bio" ${filters.bioOnly ? "checked" : ""}>
-              <label class="form-check-label" for="filter-bio">
-                <i class="bi bi-leaf-fill text-success me-1"></i>
-                Nur Bio/Öko-zertifizierte Mittel
-              </label>
-            </div>
           </div>
         </div>
         <div class="form-check mt-3">
@@ -669,13 +691,6 @@ function renderResultItemContent(result: ReportingResult): string {
   const status = result.status_json
     ? safeParseJson<Record<string, any>>(result.status_json) || {}
     : {};
-  const extras = result.extras || {};
-  const isBio =
-    Boolean(result.is_bio) ||
-    Boolean(result.is_oeko) ||
-    Boolean(extras.is_bio) ||
-    Boolean(extras.is_oeko);
-  const certBody = result.certification_body || extras.certification_body;
 
   return `
     <div class="d-flex w-100 justify-content-between align-items-start">
@@ -683,6 +698,8 @@ function renderResultItemContent(result: ReportingResult): string {
       <small class="text-muted">${escapeHtml(result.kennr)}</small>
     </div>
     <div class="mb-2">
+      <strong>Zulassungsnummer:</strong> ${escapeHtml(result.kennr)}<br>
+      <strong>Mittel:</strong> ${escapeHtml(result.name)}<br>
       <strong>Formulierung:</strong> ${escapeHtml(result.formulierung || "-")}<br>
       <strong>Status:</strong> ${escapeHtml(status.status || "-")}
     </div>
@@ -691,15 +708,6 @@ function renderResultItemContent(result: ReportingResult): string {
       ${
         result.zul_ende
           ? `<span class="badge bg-warning text-dark me-1"><i class="bi bi-calendar-event me-1"></i>Gültig bis: ${escapeHtml(result.zul_ende)}</span>`
-          : ""
-      }
-      ${
-        isBio
-          ? `<span class="badge bg-success-subtle text-success-emphasis me-1" title="${
-              certBody
-                ? `Bio-zertifiziert – ${escapeHtml(certBody)}`
-                : "Bio/Öko-zertifiziert"
-            }"><i class="bi bi-leaf-fill me-1"></i>Bio/Öko</span>`
           : ""
       }
     </div>
@@ -1155,13 +1163,31 @@ function attachEventHandlers(section: HTMLElement): void {
     });
   }
 
+  const filterMittel =
+    section.querySelector<HTMLInputElement>("#filter-mittel");
   const filterCulture =
     section.querySelector<HTMLSelectElement>("#filter-culture");
+  if (filterMittel && services) {
+    const updateMittel = (value: string) => {
+      const trimmed = value.trim();
+      services!.state.updateSlice("zulassung", (prev) => ({
+        ...prev,
+        filters: { ...prev.filters, mittel: trimmed ? trimmed : null },
+      }));
+    };
+
+    filterMittel.addEventListener("input", (event) => {
+      updateMittel((event.target as HTMLInputElement).value);
+    });
+
+    filterMittel.addEventListener("change", (event) => {
+      updateMittel((event.target as HTMLInputElement).value);
+    });
+  }
   const filterPest = section.querySelector<HTMLSelectElement>("#filter-pest");
   const filterText = section.querySelector<HTMLInputElement>("#filter-text");
   const filterExpired =
     section.querySelector<HTMLInputElement>("#filter-expired");
-  const filterBio = section.querySelector<HTMLInputElement>("#filter-bio");
   const btnApplyUpdate =
     section.querySelector<HTMLButtonElement>("#btn-apply-update");
 
@@ -1211,16 +1237,6 @@ function attachEventHandlers(section: HTMLElement): void {
       services!.state.updateSlice("zulassung", (prev) => ({
         ...prev,
         filters: { ...prev.filters, includeExpired: target.checked },
-      }));
-    });
-  }
-
-  if (filterBio && services) {
-    filterBio.addEventListener("change", (event) => {
-      const target = event.target as HTMLInputElement;
-      services!.state.updateSlice("zulassung", (prev) => ({
-        ...prev,
-        filters: { ...prev.filters, bioOnly: target.checked },
       }));
     });
   }
@@ -1318,6 +1334,7 @@ async function handleSearch(): Promise<void> {
   const normalizedFilters = {
     ...filters,
     text: filters.text ? filters.text.trim() : "",
+    mittel: filters.mittel ? filters.mittel.trim() || null : null,
   };
 
   services.state.updateSlice("zulassung", (prev) => ({
@@ -1357,11 +1374,11 @@ function handleClearFilters(): void {
   services.state.updateSlice("zulassung", (prev) => ({
     ...prev,
     filters: {
+      mittel: null,
       culture: null,
       pest: null,
       text: "",
       includeExpired: false,
-      bioOnly: false,
     },
     results: [],
   }));

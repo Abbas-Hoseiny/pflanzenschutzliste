@@ -83,6 +83,9 @@ self.onmessage = async function (event) {
       case "listBvlSchadorg":
         result = await listBvlSchadorg(payload);
         break;
+      case "listBvlMittel":
+        result = await listBvlMittel(payload);
+        break;
       case "diagnoseBvlSchema":
         result = await diagnoseBvlSchema();
         break;
@@ -173,6 +176,465 @@ function configureDatabase(targetDb = db) {
   `);
 }
 
+const tableColumnCache = new Map();
+
+function resetTableColumnCache() {
+  tableColumnCache.clear();
+}
+
+function getTableColumns(tableName) {
+  if (!db) throw new Error("Database not initialized");
+  if (tableColumnCache.has(tableName)) {
+    return tableColumnCache.get(tableName);
+  }
+
+  const columns = [];
+  db.exec({
+    sql: `PRAGMA table_info(${tableName})`,
+    callback: (row) => {
+      columns.push(row[1]);
+    },
+  });
+
+  tableColumnCache.set(tableName, columns);
+  return columns;
+}
+
+function hasTableColumn(tableName, columnName) {
+  const columns = getTableColumns(tableName);
+  return columns.includes(columnName);
+}
+
+function safeJsonParse(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(typeof value === "string" ? value : String(value));
+  } catch (error) {
+    return null;
+  }
+}
+
+function pickFirstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") {
+        continue;
+      }
+      return trimmed;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
+function toBooleanFlag(value) {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+
+  if (typeof value === "number") {
+    return value > 0 ? 1 : 0;
+  }
+
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return 0;
+    }
+    if (["1", "true", "ja", "yes", "y"].includes(normalized)) {
+      return 1;
+    }
+    return 0;
+  }
+
+  return 0;
+}
+
+function hasTable(tableName) {
+  if (!db) throw new Error("Database not initialized");
+  let exists = false;
+  db.exec({
+    sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1",
+    bind: [tableName],
+    callback: () => {
+      exists = true;
+    },
+  });
+  return exists;
+}
+
+function pickColumn(columns, ...candidates) {
+  for (const candidate of candidates) {
+    if (candidate && columns.includes(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function buildAwgKulturQueryConfig() {
+  if (!hasTable("bvl_awg_kultur")) {
+    return null;
+  }
+
+  const columns = getTableColumns("bvl_awg_kultur");
+  if (!columns.length) {
+    return null;
+  }
+
+  const codeCol = pickColumn(
+    columns,
+    "kultur",
+    "kultur_kode",
+    "kulturcode",
+    "kultur_code"
+  );
+  if (!codeCol) {
+    return null;
+  }
+
+  const labelCol = pickColumn(
+    columns,
+    "label",
+    "kultur_label",
+    "kulturtext",
+    "kultur_text",
+    "kultur_bez"
+  );
+  const excludeCol = pickColumn(
+    columns,
+    "ausgenommen",
+    "ausnahme",
+    "ausgeschl"
+  );
+  const sortCol = pickColumn(
+    columns,
+    "sortier_nr",
+    "sortier_index",
+    "sort",
+    "sortierung"
+  );
+
+  const codeExpr = `ak.${codeCol}`;
+  const trimmedCodeExpr = `TRIM(${codeExpr})`;
+  const labelBase = labelCol ? `TRIM(ak.${labelCol})` : trimmedCodeExpr;
+  const fallbackLabelExpr = `COALESCE(NULLIF(${labelBase}, ''), ${trimmedCodeExpr})`;
+  const lookupAvailable = hasTable("bvl_lookup_kultur");
+  const labelExpr = lookupAvailable
+    ? `COALESCE(NULLIF(TRIM(lk.label), ''), ${fallbackLabelExpr})`
+    : fallbackLabelExpr;
+  const excludeExpr = excludeCol ? `COALESCE(ak.${excludeCol}, 0)` : "0";
+  const sortExpr = sortCol ? `ak.${sortCol}` : "ak.rowid";
+  const orderExpr = sortCol ? "sort_order" : "label";
+
+  const joinClause = lookupAvailable
+    ? `
+    LEFT JOIN bvl_lookup_kultur lk
+      ON TRIM(lk.code) = ${trimmedCodeExpr}
+  `
+    : "";
+
+  const sql = `
+    SELECT ${trimmedCodeExpr} AS code,
+           ${labelExpr} AS label,
+           ${excludeExpr} AS excluded,
+           ${sortExpr} AS sort_order
+    FROM bvl_awg_kultur ak
+    ${joinClause}
+    WHERE ak.awg_id = ?
+    ORDER BY ${orderExpr}
+  `;
+
+  return { sql };
+}
+
+function buildAwgSchadorgQueryConfig() {
+  if (!hasTable("bvl_awg_schadorg")) {
+    return null;
+  }
+
+  const columns = getTableColumns("bvl_awg_schadorg");
+  if (!columns.length) {
+    return null;
+  }
+
+  const codeCol = pickColumn(
+    columns,
+    "schadorg",
+    "schadorg_kode",
+    "schadorgcode",
+    "schadorganismus"
+  );
+  if (!codeCol) {
+    return null;
+  }
+
+  const labelCol = pickColumn(
+    columns,
+    "label",
+    "schadorg_label",
+    "schadorg_text",
+    "schadorganismus_text",
+    "schadorg_bez"
+  );
+  const excludeCol = pickColumn(
+    columns,
+    "ausgenommen",
+    "ausnahme",
+    "ausgeschl"
+  );
+  const sortCol = pickColumn(
+    columns,
+    "sortier_nr",
+    "sortier_index",
+    "sort",
+    "sortierung"
+  );
+
+  const codeExpr = `aso.${codeCol}`;
+  const trimmedCodeExpr = `TRIM(${codeExpr})`;
+  const labelBase = labelCol ? `TRIM(aso.${labelCol})` : trimmedCodeExpr;
+  const fallbackLabelExpr = `COALESCE(NULLIF(${labelBase}, ''), ${trimmedCodeExpr})`;
+  const lookupAvailable = hasTable("bvl_lookup_schadorg");
+  const labelExpr = lookupAvailable
+    ? `COALESCE(NULLIF(TRIM(ls.label), ''), ${fallbackLabelExpr})`
+    : fallbackLabelExpr;
+  const excludeExpr = excludeCol ? `COALESCE(aso.${excludeCol}, 0)` : "0";
+  const sortExpr = sortCol ? `aso.${sortCol}` : "aso.rowid";
+  const orderExpr = sortCol ? "sort_order" : "label";
+
+  const joinClause = lookupAvailable
+    ? `
+    LEFT JOIN bvl_lookup_schadorg ls
+      ON TRIM(ls.code) = ${trimmedCodeExpr}
+  `
+    : "";
+
+  const sql = `
+    SELECT ${trimmedCodeExpr} AS code,
+           ${labelExpr} AS label,
+           ${excludeExpr} AS excluded,
+           ${sortExpr} AS sort_order
+    FROM bvl_awg_schadorg aso
+    ${joinClause}
+    WHERE aso.awg_id = ?
+    ORDER BY ${orderExpr}
+  `;
+
+  return { sql };
+}
+
+function buildAwgAufwandQueryConfig() {
+  if (!hasTable("bvl_awg_aufwand")) {
+    return null;
+  }
+
+  const columns = getTableColumns("bvl_awg_aufwand");
+  if (!columns.length) {
+    return null;
+  }
+
+  const conditionCol = pickColumn(
+    columns,
+    "aufwand_bedingung",
+    "aufwand_bed",
+    "bedingung",
+    "aufwand_bedingung_text"
+  );
+  const sortCol = pickColumn(
+    columns,
+    "sortier_nr",
+    "sortier_index",
+    "sort",
+    "sortierung"
+  );
+
+  const mittelValueCol = pickColumn(
+    columns,
+    "mittel_menge",
+    "aufwand_menge",
+    "aufwandmenge",
+    "aufwand"
+  );
+  const mittelMinCol = pickColumn(
+    columns,
+    "mittel_menge_von",
+    "aufwandmenge_min",
+    "aufwandmenge_von"
+  );
+  const mittelMaxCol = pickColumn(
+    columns,
+    "mittel_menge_bis",
+    "aufwandmenge_max",
+    "aufwandmenge_bis"
+  );
+  const mittelUnitCol = pickColumn(
+    columns,
+    "mittel_einheit",
+    "aufwandmenge_einheit",
+    "aufwand_unit"
+  );
+
+  const wasserValueCol = pickColumn(columns, "wasser_menge", "wassermenge");
+  const wasserMinCol = pickColumn(
+    columns,
+    "wasser_menge_von",
+    "wassermenge_min"
+  );
+  const wasserMaxCol = pickColumn(
+    columns,
+    "wasser_menge_bis",
+    "wassermenge_max"
+  );
+  const wasserUnitCol = pickColumn(
+    columns,
+    "wasser_einheit",
+    "wassermenge_einheit"
+  );
+
+  const payloadCol = columns.includes("payload_json") ? "payload_json" : null;
+
+  const conditionExpr = conditionCol
+    ? `COALESCE(NULLIF(TRIM(a.${conditionCol}), ''), 'Standard')`
+    : "'Standard'";
+  const sortExpr = sortCol ? `a.${sortCol}` : "a.rowid";
+
+  const sql = `
+    SELECT
+      ${conditionExpr} AS condition,
+      ${sortExpr} AS sort_order,
+      ${mittelValueCol ? `a.${mittelValueCol}` : "NULL"} AS mittel_value,
+      ${mittelMinCol ? `a.${mittelMinCol}` : "NULL"} AS mittel_min,
+      ${mittelMaxCol ? `a.${mittelMaxCol}` : "NULL"} AS mittel_max,
+      ${mittelUnitCol ? `a.${mittelUnitCol}` : "NULL"} AS mittel_unit,
+      ${wasserValueCol ? `a.${wasserValueCol}` : "NULL"} AS wasser_value,
+      ${wasserMinCol ? `a.${wasserMinCol}` : "NULL"} AS wasser_min,
+      ${wasserMaxCol ? `a.${wasserMaxCol}` : "NULL"} AS wasser_max,
+      ${wasserUnitCol ? `a.${wasserUnitCol}` : "NULL"} AS wasser_unit,
+      ${payloadCol ? `a.${payloadCol}` : "NULL"} AS payload_json
+    FROM bvl_awg_aufwand a
+    WHERE a.awg_id = ?
+    ORDER BY ${sortCol ? "sort_order" : "a.rowid"}
+  `;
+
+  return { sql };
+}
+
+function buildAwgWartezeitQueryConfig() {
+  if (!hasTable("bvl_awg_wartezeit")) {
+    return null;
+  }
+
+  const columns = getTableColumns("bvl_awg_wartezeit");
+  if (!columns.length) {
+    return null;
+  }
+
+  const kulturCol = pickColumn(
+    columns,
+    "kultur",
+    "kultur_kode",
+    "kulturcode",
+    "kultur_code"
+  );
+  if (!kulturCol) {
+    return null;
+  }
+
+  const labelCol = pickColumn(
+    columns,
+    "kultur_label",
+    "kultur_text",
+    "kultur_bez",
+    "kulturname"
+  );
+  const sortCol = pickColumn(
+    columns,
+    "sortier_nr",
+    "sortier_index",
+    "sort",
+    "sortierung"
+  );
+  const tageCol = pickColumn(columns, "tage", "wartezeit_tage", "wartezeit");
+  const bemerkungCol = pickColumn(
+    columns,
+    "bemerkung_kode",
+    "bemerkung",
+    "wartezeit_text",
+    "hinweis"
+  );
+  const anwendungsbereichCol = pickColumn(
+    columns,
+    "anwendungsbereich",
+    "bereich"
+  );
+  const erlaeuterungCol = pickColumn(
+    columns,
+    "erlaeuterung",
+    "zusatztext",
+    "hinweis_text"
+  );
+  const payloadCol = columns.includes("payload_json") ? "payload_json" : null;
+
+  const codeExpr = `w.${kulturCol}`;
+  const trimmedCodeExpr = `TRIM(${codeExpr})`;
+  const labelBase = labelCol ? `TRIM(w.${labelCol})` : trimmedCodeExpr;
+  const fallbackLabelExpr = `COALESCE(NULLIF(${labelBase}, ''), ${trimmedCodeExpr})`;
+  const lookupAvailable = hasTable("bvl_lookup_kultur");
+  const labelExpr = lookupAvailable
+    ? `COALESCE(NULLIF(TRIM(lk.label), ''), ${fallbackLabelExpr})`
+    : fallbackLabelExpr;
+  const sortExpr = sortCol ? `w.${sortCol}` : "w.rowid";
+  const tageExpr = tageCol ? `w.${tageCol}` : "NULL";
+  const bemerkungExpr = bemerkungCol ? `w.${bemerkungCol}` : "NULL";
+  const anwendungsbereichExpr = anwendungsbereichCol
+    ? `w.${anwendungsbereichCol}`
+    : "NULL";
+  const erlaeuterungExpr = erlaeuterungCol ? `w.${erlaeuterungCol}` : "NULL";
+  const joinClause = lookupAvailable
+    ? `
+    LEFT JOIN bvl_lookup_kultur lk
+      ON TRIM(lk.code) = ${trimmedCodeExpr}
+  `
+    : "";
+
+  const sql = `
+    SELECT
+      ${trimmedCodeExpr} AS kultur_code,
+      ${labelExpr} AS kultur_label,
+      ${sortExpr} AS sort_order,
+      ${tageExpr} AS tage,
+      ${bemerkungExpr} AS bemerkung,
+      ${anwendungsbereichExpr} AS anwendungsbereich,
+      ${erlaeuterungExpr} AS erlaeuterung,
+      ${payloadCol ? `w.${payloadCol}` : "NULL"} AS payload_json
+    FROM bvl_awg_wartezeit w
+    ${joinClause}
+    WHERE w.awg_id = ?
+    ORDER BY ${sortCol ? "sort_order" : "w.rowid"}
+  `;
+
+  return { sql };
+}
+
 /**
  * Apply database schema
  */
@@ -244,7 +706,6 @@ async function applySchema() {
         PRAGMA foreign_keys = OFF;
   DROP TABLE IF EXISTS bvl_lookup_schadorg;
   DROP TABLE IF EXISTS bvl_lookup_kultur;
-  DROP TABLE IF EXISTS bvl_mittel_extras;
   DROP TABLE IF EXISTS bvl_awg_wartezeit;
   DROP TABLE IF EXISTS bvl_awg_aufwand;
   DROP TABLE IF EXISTS bvl_awg_schadorg;
@@ -272,15 +733,6 @@ async function applySchema() {
           payload_json TEXT
         );
 
-        CREATE TABLE bvl_mittel_extras (
-          kennr TEXT PRIMARY KEY,
-          is_bio INTEGER DEFAULT 0,
-          is_oeko INTEGER DEFAULT 0,
-          certification_body TEXT,
-          payload_json TEXT,
-          FOREIGN KEY (kennr) REFERENCES bvl_mittel(kennr) ON DELETE CASCADE
-        );
-        
         CREATE TABLE bvl_awg (
           awg_id TEXT PRIMARY KEY,
           kennr TEXT REFERENCES bvl_mittel(kennr) ON DELETE CASCADE,
@@ -373,20 +825,6 @@ async function applySchema() {
     db.exec("BEGIN TRANSACTION");
 
     try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS bvl_mittel_extras (
-          kennr TEXT PRIMARY KEY,
-          is_bio INTEGER DEFAULT 0,
-          is_oeko INTEGER DEFAULT 0,
-          certification_body TEXT,
-          payload_json TEXT,
-          FOREIGN KEY (kennr) REFERENCES bvl_mittel(kennr) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_mittel_extras_bio ON bvl_mittel_extras(is_bio);
-        CREATE INDEX IF NOT EXISTS idx_mittel_extras_oeko ON bvl_mittel_extras(is_oeko);
-      `);
-
       db.exec("PRAGMA user_version = 3;");
       db.exec("COMMIT");
       console.log("Database migrated to version 3 successfully");
@@ -396,32 +834,120 @@ async function applySchema() {
       throw error;
     }
   }
+
+  if (currentVersion < 4) {
+    console.log("Migrating database to version 4...");
+
+    db.exec("BEGIN TRANSACTION");
+
+    try {
+      db.exec(`
+        DROP TABLE IF EXISTS bvl_mittel_extras;
+        DROP INDEX IF EXISTS idx_mittel_extras_bio;
+        DROP INDEX IF EXISTS idx_mittel_extras_oeko;
+      `);
+
+      db.exec("PRAGMA user_version = 4;");
+      db.exec("COMMIT");
+      console.log("Database migrated to version 4 successfully");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      console.error("Migration to version 4 failed:", error);
+      throw error;
+    }
+  }
+
+  resetTableColumnCache();
 }
 
-function ensureBvlExtrasTable() {
+function hydrateBvlMittelFromPayload() {
   if (!db) throw new Error("Database not initialized");
 
-  let exists = false;
-  db.exec({
-    sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-    callback: () => {
-      exists = true;
-    },
-  });
+  const columns = getTableColumns("bvl_mittel");
+  const hasName = columns.includes("name");
+  const hasMittelname = columns.includes("mittelname");
+  const hasFormulierung = columns.includes("formulierung");
+  const hasFormulierungArt = columns.includes("formulierung_art");
+  const hasZulEnde = columns.includes("zul_ende");
+  const hasZulassungsende = columns.includes("zulassungsende");
+  const hasGeringesRisiko = columns.includes("geringes_risiko");
 
-  if (!exists) {
+  const assignments = [];
+
+  if (hasName) {
+    assignments.push(`
+      name = COALESCE(
+        NULLIF(TRIM(name), ''),
+        ${hasMittelname ? "NULLIF(TRIM(mittelname), '')," : ""}
+        NULLIF(TRIM(json_extract(payload_json, '$.mittelname')), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.mittel_name')), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.mittelName')), ''),
+        name
+      )
+    `);
+  }
+
+  if (!hasName && hasMittelname) {
+    assignments.push(`
+      mittelname = COALESCE(
+        NULLIF(TRIM(mittelname), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.mittelname')), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.mittel_name')), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.mittelName')), ''),
+        mittelname
+      )
+    `);
+  }
+
+  if (hasFormulierung || hasFormulierungArt) {
+    const targetColumn = hasFormulierung ? "formulierung" : "formulierung_art";
+    assignments.push(`
+      ${targetColumn} = COALESCE(
+        NULLIF(TRIM(${targetColumn}), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.formulierung')), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.formulierung_art')), ''),
+        ${targetColumn}
+      )
+    `);
+  }
+
+  if (hasZulEnde || hasZulassungsende) {
+    const targetColumn = hasZulEnde ? "zul_ende" : "zulassungsende";
+    assignments.push(`
+      ${targetColumn} = COALESCE(
+        NULLIF(TRIM(${targetColumn}), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.zul_ende')), ''),
+        NULLIF(TRIM(json_extract(payload_json, '$.zulassungsende')), ''),
+        ${targetColumn}
+      )
+    `);
+  }
+
+  if (assignments.length) {
     db.exec(`
-      CREATE TABLE IF NOT EXISTS bvl_mittel_extras (
-        kennr TEXT PRIMARY KEY,
-        is_bio INTEGER DEFAULT 0,
-        is_oeko INTEGER DEFAULT 0,
-        certification_body TEXT,
-        payload_json TEXT,
-        FOREIGN KEY (kennr) REFERENCES bvl_mittel(kennr) ON DELETE CASCADE
-      );
+      UPDATE bvl_mittel
+      SET ${assignments
+        .map((assignment) => assignment.replace(/\s+/g, " ").trim())
+        .join(", ")};
+    `);
+  }
 
-      CREATE INDEX IF NOT EXISTS idx_mittel_extras_bio ON bvl_mittel_extras(is_bio);
-      CREATE INDEX IF NOT EXISTS idx_mittel_extras_oeko ON bvl_mittel_extras(is_oeko);
+  if (hasGeringesRisiko) {
+    db.exec(`
+      UPDATE bvl_mittel
+      SET geringes_risiko = COALESCE(
+        geringes_risiko,
+        CASE
+          WHEN json_valid(payload_json)
+            THEN CASE
+              WHEN CAST(json_extract(payload_json, '$.mittel_mit_geringem_risiko') AS INTEGER) = 1 THEN 1
+              WHEN LOWER(json_extract(payload_json, '$.mittel_mit_geringem_risiko')) IN ('true', 'ja') THEN 1
+              ELSE 0
+            END
+          ELSE 0
+        END,
+        0
+      );
     `);
   }
 }
@@ -920,7 +1446,6 @@ async function importBvlDataset(payload) {
 
   const {
     mittel,
-    mittelExtras,
     awg,
     awg_kultur,
     awg_schadorg,
@@ -930,8 +1455,6 @@ async function importBvlDataset(payload) {
     pestsLookup,
   } = payload;
   const debug = payload.debug || false;
-
-  ensureBvlExtrasTable();
 
   db.exec("BEGIN TRANSACTION");
 
@@ -944,7 +1467,6 @@ async function importBvlDataset(payload) {
       DELETE FROM bvl_awg_kultur;
       DELETE FROM bvl_awg;
       DELETE FROM bvl_mittel;
-      DELETE FROM bvl_mittel_extras;
       DELETE FROM bvl_lookup_kultur;
       DELETE FROM bvl_lookup_schadorg;
     `);
@@ -976,32 +1498,6 @@ async function importBvlDataset(payload) {
       stmt.finalize();
       counts.mittel = mittel.length;
       if (debug) console.debug(`Imported ${mittel.length} mittel`);
-    }
-
-    if (mittelExtras && mittelExtras.length > 0) {
-      const stmt = db.prepare(`
-        INSERT OR REPLACE INTO bvl_mittel_extras
-        (kennr, is_bio, is_oeko, certification_body, payload_json)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-
-      for (const item of mittelExtras) {
-        stmt
-          .bind([
-            item.kennr,
-            item.is_bio || 0,
-            item.is_oeko || 0,
-            item.certification_body || null,
-            item.payload_json || null,
-          ])
-          .step();
-        stmt.reset();
-      }
-      stmt.finalize();
-      counts.bvl_mittel_extras = mittelExtras.length;
-      if (debug) console.debug(`Imported ${mittelExtras.length} mittel extras`);
-    } else {
-      counts.bvl_mittel_extras = 0;
     }
 
     // Import awg
@@ -1163,6 +1659,7 @@ async function importBvlDataset(payload) {
     }
 
     db.exec("COMMIT");
+    resetTableColumnCache();
     return { success: true, counts };
   } catch (error) {
     db.exec("ROLLBACK");
@@ -1229,6 +1726,9 @@ async function importBvlSqlite(payload) {
   );
 
   // Begin transaction on main database
+  const wasForeignKeysEnabled =
+    Number(db.selectValue("PRAGMA foreign_keys") || 0) === 1;
+  db.exec("PRAGMA foreign_keys = OFF");
   db.exec("BEGIN TRANSACTION");
 
   try {
@@ -1306,10 +1806,7 @@ async function importBvlSqlite(payload) {
 
       const colList = commonColumns.join(", ");
 
-      // Attach remote database
-      db.exec(`ATTACH DATABASE ':memory:' AS remote`);
-
-      // Copy the remote database into the attached database
+      // Copy the remote database into a temporary in-memory instance
       const remoteCopy = new sqlite3.oo1.DB(":memory:");
       const remoteExport = sqlite3.capi.sqlite3_js_db_export(remoteDb.pointer);
 
@@ -1364,16 +1861,20 @@ async function importBvlSqlite(payload) {
       remoteCopy.close();
     }
 
+    hydrateBvlMittelFromPayload();
+
     // Update metadata from manifest
     if (manifest) {
+      const manifestCounts = manifest.tables ? { ...manifest.tables } : {};
+
       const metaUpdates = {
         dataSource: `pflanzenschutz-db@${manifest.version}`,
         lastSyncIso: new Date().toISOString(),
         lastSyncHash: manifest.hash || manifest.version,
       };
 
-      if (manifest.tables) {
-        metaUpdates.lastSyncCounts = JSON.stringify(manifest.tables);
+      if (Object.keys(manifestCounts).length > 0) {
+        metaUpdates.lastSyncCounts = JSON.stringify(manifestCounts);
       }
 
       if (manifest.api_version) {
@@ -1397,8 +1898,6 @@ async function importBvlSqlite(payload) {
       metaStmt.finalize();
     }
 
-    ensureBvlExtrasTable();
-
     // Verify database integrity
     const integrityResult = db.selectValue("PRAGMA integrity_check");
     if (integrityResult !== "ok") {
@@ -1406,15 +1905,24 @@ async function importBvlSqlite(payload) {
     }
 
     db.exec("COMMIT");
-    remoteDb.close();
 
     console.log("BVL SQLite import complete", counts);
+    resetTableColumnCache();
     return { success: true, counts };
   } catch (error) {
     db.exec("ROLLBACK");
-    remoteDb.close();
     console.error("Failed to import BVL SQLite:", error);
     throw error;
+  } finally {
+    try {
+      if (remoteDb) {
+        remoteDb.close();
+      }
+    } catch (closeError) {
+      console.warn("Failed to close remote database after import", closeError);
+    }
+
+    db.exec(`PRAGMA foreign_keys = ${wasForeignKeysEnabled ? 1 : 0}`);
   }
 }
 
@@ -1461,7 +1969,6 @@ async function appendBvlSyncLog(payload) {
 
   return { success: true };
 }
-
 async function listBvlSyncLog(payload) {
   if (!db) throw new Error("Database not initialized");
 
@@ -1488,40 +1995,148 @@ async function listBvlSyncLog(payload) {
 async function queryZulassung(payload) {
   if (!db) throw new Error("Database not initialized");
 
-  const { culture, pest, text, includeExpired, bioOnly } = payload || {};
+  const { culture, pest, text, includeExpired, mittel } = payload || {};
+
+  const clean = (expr) => expr.replace(/\s+/g, " ").trim();
+
+  const mittelColumns = getTableColumns("bvl_mittel");
+  const awgColumns = getTableColumns("bvl_awg");
+  const mittelHasPayload = mittelColumns.includes("payload_json");
+  const awgHasPayload = awgColumns.includes("payload_json");
+  const kulturConfig = buildAwgKulturQueryConfig();
+  const schadorgConfig = buildAwgSchadorgQueryConfig();
+  const aufwandConfig = buildAwgAufwandQueryConfig();
+  const wartezeitConfig = buildAwgWartezeitQueryConfig();
+
+  const nameExprParts = [];
+  if (mittelColumns.includes("name")) {
+    nameExprParts.push("NULLIF(TRIM(m.name), '')");
+  }
+  if (mittelColumns.includes("mittelname")) {
+    nameExprParts.push("NULLIF(TRIM(m.mittelname), '')");
+  }
+  if (mittelColumns.includes("mittel_name")) {
+    nameExprParts.push("NULLIF(TRIM(m.mittel_name), '')");
+  }
+  if (mittelHasPayload) {
+    nameExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.mittelname')), '')"
+    );
+    nameExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.mittel_name')), '')"
+    );
+    nameExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.mittelName')), '')"
+    );
+    nameExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.name')), '')"
+    );
+  }
+  const rawNameExpr = nameExprParts.length
+    ? clean(`COALESCE(${nameExprParts.join(", ")}, m.kennr)`)
+    : "m.kennr";
+  const selectNameExpr = `${rawNameExpr} AS name`;
+
+  const formulierungExprParts = [];
+  if (mittelColumns.includes("formulierung")) {
+    formulierungExprParts.push("NULLIF(TRIM(m.formulierung), '')");
+  }
+  if (mittelColumns.includes("formulierung_art")) {
+    formulierungExprParts.push("NULLIF(TRIM(m.formulierung_art), '')");
+  }
+  if (mittelHasPayload) {
+    formulierungExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.formulierung')), '')"
+    );
+    formulierungExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.formulierung_art')), '')"
+    );
+  }
+  const rawFormulierungExpr = formulierungExprParts.length
+    ? clean(`COALESCE(${formulierungExprParts.join(", ")})`)
+    : "NULL";
+  const selectFormulierungExpr = `${rawFormulierungExpr} AS formulierung`;
+
+  const zulEndeExprParts = [];
+  if (mittelColumns.includes("zul_ende")) {
+    zulEndeExprParts.push("NULLIF(TRIM(m.zul_ende), '')");
+  }
+  if (mittelColumns.includes("zulassungsende")) {
+    zulEndeExprParts.push("NULLIF(TRIM(m.zulassungsende), '')");
+  }
+  if (awgColumns.includes("zulassungsende")) {
+    zulEndeExprParts.push("NULLIF(TRIM(a.zulassungsende), '')");
+  }
+  if (mittelHasPayload) {
+    zulEndeExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.zul_ende')), '')"
+    );
+    zulEndeExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.zulassungsende')), '')"
+    );
+    zulEndeExprParts.push(
+      "NULLIF(TRIM(json_extract(m.payload_json, '$.gueltig_bis')), '')"
+    );
+  }
+  const rawZulEndeExpr = zulEndeExprParts.length
+    ? clean(`COALESCE(${zulEndeExprParts.join(", ")})`)
+    : null;
+  const selectZulEndeExpr = rawZulEndeExpr
+    ? `${rawZulEndeExpr} AS zul_ende`
+    : "NULL AS zul_ende";
+
+  const geringesParts = [];
+  if (mittelColumns.includes("geringes_risiko")) {
+    geringesParts.push("m.geringes_risiko");
+  }
+  if (mittelHasPayload) {
+    geringesParts.push(`CASE
+      WHEN json_valid(m.payload_json)
+        THEN CASE
+          WHEN CAST(json_extract(m.payload_json, '$.mittel_mit_geringem_risiko') AS INTEGER) = 1 THEN 1
+          WHEN LOWER(json_extract(m.payload_json, '$.mittel_mit_geringem_risiko')) IN ('true', 'ja') THEN 1
+          ELSE 0
+        END
+      ELSE 0
+    END`);
+  }
+  const selectGeringesExpr = geringesParts.length
+    ? clean(`COALESCE(${geringesParts.join(", ")}, 0) AS geringes_risiko`)
+    : "0 AS geringes_risiko";
+
+  const statusExpr = awgColumns.includes("status_json")
+    ? "a.status_json"
+    : awgColumns.includes("status")
+      ? "json_object('status', a.status)"
+      : awgColumns.includes("status_text")
+        ? "json_object('status', a.status_text)"
+        : "NULL";
+  const awgPayloadExpr = awgHasPayload ? "a.payload_json" : "NULL";
+  const mittelPayloadExpr = mittelHasPayload ? "m.payload_json" : "NULL";
+
+  const selectFields = [
+    "m.kennr",
+    selectNameExpr,
+    selectFormulierungExpr,
+    selectZulEndeExpr,
+    selectGeringesExpr,
+    "a.awg_id",
+    clean(`${statusExpr} AS status_payload`),
+    clean(`${awgPayloadExpr} AS awg_payload`),
+    clean(`${mittelPayloadExpr} AS mittel_payload`),
+  ];
+
+  const selectClause = selectFields.map(clean).join(",\n      ");
 
   let sql = `
     SELECT DISTINCT
-      m.kennr,
-      m.name,
-      m.formulierung,
-      m.zul_ende,
-      m.geringes_risiko,
-      a.awg_id,
-      a.status_json,
-      a.zulassungsende
+      ${selectClause}
     FROM bvl_mittel m
     JOIN bvl_awg a ON m.kennr = a.kennr
   `;
 
   const conditions = [];
   const bindings = [];
-
-  // Check if extras table exists for bio filtering
-  let extrasTableExists = false;
-  if (bioOnly) {
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-      callback: () => {
-        extrasTableExists = true;
-      },
-    });
-
-    if (extrasTableExists) {
-      sql += ` LEFT JOIN bvl_mittel_extras e ON m.kennr = e.kennr `;
-      conditions.push("(e.is_bio = 1 OR e.is_oeko = 1)");
-    }
-  }
 
   if (culture) {
     sql += ` JOIN bvl_awg_kultur ak ON a.awg_id = ak.awg_id `;
@@ -1538,9 +2153,30 @@ async function queryZulassung(payload) {
   if (text) {
     const searchTerm = text.toLowerCase();
     const textPattern = `%${searchTerm}%`;
-    conditions.push(`(
-      LOWER(m.name) LIKE ? OR LOWER(m.kennr) LIKE ? OR
-      EXISTS (
+
+    const textColumnExprs = ["LOWER(m.kennr) LIKE ?"];
+    if (mittelColumns.includes("name")) {
+      textColumnExprs.push("LOWER(m.name) LIKE ?");
+    }
+    if (mittelColumns.includes("mittelname")) {
+      textColumnExprs.push("LOWER(m.mittelname) LIKE ?");
+    }
+    if (mittelColumns.includes("mittel_name")) {
+      textColumnExprs.push("LOWER(m.mittel_name) LIKE ?");
+    }
+    if (mittelHasPayload) {
+      textColumnExprs.push(
+        "LOWER(json_extract(m.payload_json, '$.mittelname')) LIKE ?"
+      );
+      textColumnExprs.push(
+        "LOWER(json_extract(m.payload_json, '$.mittel_name')) LIKE ?"
+      );
+      textColumnExprs.push(
+        "LOWER(json_extract(m.payload_json, '$.mittelName')) LIKE ?"
+      );
+    }
+
+    const cultureFilterClause = `EXISTS (
         SELECT 1
         FROM bvl_awg_kultur ak_filter
         LEFT JOIN bvl_lookup_kultur lk_filter ON lk_filter.code = ak_filter.kultur
@@ -1549,8 +2185,9 @@ async function queryZulassung(payload) {
             LOWER(ak_filter.kultur) LIKE ? OR
             LOWER(IFNULL(lk_filter.label, '')) LIKE ?
           )
-      ) OR
-      EXISTS (
+      )`;
+
+    const pestFilterClause = `EXISTS (
         SELECT 1
         FROM bvl_awg_schadorg aso_filter
         LEFT JOIN bvl_lookup_schadorg ls_filter ON ls_filter.code = aso_filter.schadorg
@@ -1559,27 +2196,76 @@ async function queryZulassung(payload) {
             LOWER(aso_filter.schadorg) LIKE ? OR
             LOWER(IFNULL(ls_filter.label, '')) LIKE ?
           )
-      )
-    )`);
-    bindings.push(
-      textPattern,
-      textPattern,
-      textPattern,
-      textPattern,
-      textPattern,
-      textPattern
-    );
+      )`;
+
+    const combinedTextConditions = [
+      ...textColumnExprs.map((expr) => `(${expr})`),
+      cultureFilterClause,
+      pestFilterClause,
+    ];
+
+    conditions.push(`(${combinedTextConditions.join(" OR ")})`);
+
+    for (let i = 0; i < textColumnExprs.length; i += 1) {
+      bindings.push(textPattern);
+    }
+    bindings.push(textPattern, textPattern); // culture
+    bindings.push(textPattern, textPattern); // pest
+  }
+
+  if (mittel) {
+    const normalized = String(mittel).trim().toLowerCase();
+    const isExactKennr = /^[0-9a-z]+-[0-9a-z]+$/i.test(normalized);
+    if (isExactKennr) {
+      conditions.push("LOWER(m.kennr) = ?");
+      bindings.push(normalized);
+    } else {
+      const mittelPattern = `%${normalized}%`;
+      const mittelExprs = ["LOWER(m.kennr) LIKE ?"];
+      if (mittelColumns.includes("name")) {
+        mittelExprs.push("LOWER(m.name) LIKE ?");
+      }
+      if (mittelColumns.includes("mittelname")) {
+        mittelExprs.push("LOWER(m.mittelname) LIKE ?");
+      }
+      if (mittelColumns.includes("mittel_name")) {
+        mittelExprs.push("LOWER(m.mittel_name) LIKE ?");
+      }
+      if (mittelHasPayload) {
+        mittelExprs.push(
+          "LOWER(json_extract(m.payload_json, '$.mittelname')) LIKE ?"
+        );
+      }
+      conditions.push(`(${mittelExprs.join(" OR ")})`);
+      for (let i = 0; i < mittelExprs.length; i += 1) {
+        bindings.push(mittelPattern);
+      }
+    }
   }
 
   if (!includeExpired) {
-    conditions.push("(m.zul_ende IS NULL OR m.zul_ende >= date('now'))");
+    if (rawZulEndeExpr) {
+      conditions.push(
+        `(${rawZulEndeExpr} IS NULL OR DATE(${rawZulEndeExpr}) >= DATE('now'))`
+      );
+    } else if (awgHasPayload) {
+      const payloadExpiryCoalesce = clean(
+        `COALESCE(
+          json_extract(a.payload_json, '$.zulassungsende'),
+          json_extract(a.payload_json, '$.gueltig_bis')
+        )`
+      );
+      conditions.push(
+        `(${payloadExpiryCoalesce} IS NULL OR DATE(${payloadExpiryCoalesce}) >= DATE('now'))`
+      );
+    }
   }
 
   if (conditions.length > 0) {
     sql += " WHERE " + conditions.join(" AND ");
   }
 
-  sql += " ORDER BY m.name";
+  sql += " ORDER BY name COLLATE NOCASE";
 
   const results = [];
 
@@ -1594,107 +2280,177 @@ async function queryZulassung(payload) {
         zul_ende: row[3],
         geringes_risiko: row[4],
         awg_id: row[5],
-        status_json: row[6],
-        zulassungsende: row[7],
+        status_payload: row[6],
+        awg_payload: row[7],
+        mittel_payload: row[8],
       });
     },
   });
 
   // Enrich each result with detailed information
   for (const result of results) {
+    const mittelPayload = safeJsonParse(result.mittel_payload);
+    const awgPayload = safeJsonParse(result.awg_payload);
+    const statusPayload = safeJsonParse(result.status_payload);
+
+    const resolvedName = pickFirstNonEmpty(
+      result.name,
+      mittelPayload?.mittelname,
+      mittelPayload?.mittel_name,
+      mittelPayload?.mittelName,
+      mittelPayload?.name,
+      result.kennr
+    );
+    result.name = resolvedName ? String(resolvedName) : String(result.kennr);
+
+    const resolvedFormulierung = pickFirstNonEmpty(
+      result.formulierung,
+      mittelPayload?.formulierung,
+      mittelPayload?.formulierung_art
+    );
+    result.formulierung =
+      resolvedFormulierung === null || resolvedFormulierung === undefined
+        ? null
+        : String(resolvedFormulierung).trim() || null;
+
+    const resolvedExpiry = pickFirstNonEmpty(
+      result.zul_ende,
+      awgPayload?.zulassungsende,
+      awgPayload?.gueltig_bis,
+      mittelPayload?.zul_ende,
+      mittelPayload?.zulassungsende,
+      mittelPayload?.gueltig_bis,
+      mittelPayload?.gueltigBis
+    );
+    result.zul_ende =
+      resolvedExpiry === null || resolvedExpiry === undefined
+        ? null
+        : String(resolvedExpiry);
+
+    let geringesValue = toBooleanFlag(result.geringes_risiko);
+    if (mittelPayload) {
+      geringesValue = Math.max(
+        geringesValue,
+        toBooleanFlag(mittelPayload.mittel_mit_geringem_risiko)
+      );
+    }
+    result.geringes_risiko = geringesValue === 1;
+
+    let statusObject = statusPayload;
+    if (!statusObject && typeof result.status_payload === "string") {
+      const trimmedStatus = result.status_payload.trim();
+      if (trimmedStatus) {
+        statusObject = { status: trimmedStatus };
+      }
+    }
+
+    if (!statusObject && awgPayload) {
+      const statusText = pickFirstNonEmpty(
+        awgPayload.status,
+        awgPayload.status_text,
+        awgPayload.status_bez,
+        awgPayload.statustext
+      );
+      const gueltigBis = pickFirstNonEmpty(
+        awgPayload.gueltig_bis,
+        awgPayload.zulassungsende,
+        awgPayload.gueltigBis
+      );
+      if (statusText || gueltigBis) {
+        statusObject = {};
+        if (statusText) {
+          statusObject.status = statusText;
+        }
+        if (gueltigBis) {
+          statusObject.gueltig_bis = gueltigBis;
+        }
+      }
+    }
+
+    result.status_json = statusObject ? JSON.stringify(statusObject) : null;
+
+    delete result.status_payload;
+    delete result.awg_payload;
+    delete result.mittel_payload;
+
     // Get cultures
     result.kulturen = [];
-    db.exec({
-      sql: `
-        SELECT ak.kultur, ak.ausgenommen, ak.sortier_nr, IFNULL(lk.label, ak.kultur) as label
-        FROM bvl_awg_kultur ak
-        LEFT JOIN bvl_lookup_kultur lk ON lk.code = ak.kultur
-        WHERE ak.awg_id = ? 
-        ORDER BY ak.sortier_nr
-      `,
-      bind: [result.awg_id],
-      callback: (row) => {
-        result.kulturen.push({
-          kultur: row[0],
-          ausgenommen: row[1],
-          sortier_nr: row[2],
-          label: row[3],
-        });
-      },
-    });
+    if (kulturConfig) {
+      db.exec({
+        sql: kulturConfig.sql,
+        bind: [result.awg_id],
+        callback: (row) => {
+          result.kulturen.push({
+            kultur: row[0],
+            label: row[1],
+            ausgenommen: toBooleanFlag(row[2]) === 1,
+            sortier_nr: row[3],
+          });
+        },
+      });
+    }
 
     // Get schadorganismen
     result.schadorganismen = [];
-    db.exec({
-      sql: `
-        SELECT aso.schadorg, aso.ausgenommen, aso.sortier_nr, IFNULL(ls.label, aso.schadorg) as label
-        FROM bvl_awg_schadorg aso
-        LEFT JOIN bvl_lookup_schadorg ls ON ls.code = aso.schadorg
-        WHERE aso.awg_id = ? 
-        ORDER BY aso.sortier_nr
-      `,
-      bind: [result.awg_id],
-      callback: (row) => {
-        result.schadorganismen.push({
-          schadorg: row[0],
-          ausgenommen: row[1],
-          sortier_nr: row[2],
-          label: row[3],
-        });
-      },
-    });
+    if (schadorgConfig) {
+      db.exec({
+        sql: schadorgConfig.sql,
+        bind: [result.awg_id],
+        callback: (row) => {
+          result.schadorganismen.push({
+            schadorg: row[0],
+            label: row[1],
+            ausgenommen: toBooleanFlag(row[2]) === 1,
+            sortier_nr: row[3],
+          });
+        },
+      });
+    }
 
     // Get aufwände
     result.aufwaende = [];
-    db.exec({
-      sql: `
-        SELECT aufwand_bedingung, sortier_nr, mittel_menge, mittel_einheit,
-               wasser_menge, wasser_einheit, payload_json
-        FROM bvl_awg_aufwand 
-        WHERE awg_id = ? 
-        ORDER BY sortier_nr
-      `,
-      bind: [result.awg_id],
-      callback: (row) => {
-        result.aufwaende.push({
-          aufwand_bedingung: row[0],
-          sortier_nr: row[1],
-          mittel_menge: row[2],
-          mittel_einheit: row[3],
-          wasser_menge: row[4],
-          wasser_einheit: row[5],
-          payload_json: row[6],
-        });
-      },
-    });
+    if (aufwandConfig) {
+      db.exec({
+        sql: aufwandConfig.sql,
+        bind: [result.awg_id],
+        callback: (row) => {
+          result.aufwaende.push({
+            aufwand_bedingung: row[0],
+            sortier_nr: row[1],
+            mittel_menge: row[2],
+            mittel_menge_min: row[3],
+            mittel_menge_max: row[4],
+            mittel_einheit: row[5],
+            wasser_menge: row[6],
+            wasser_menge_min: row[7],
+            wasser_menge_max: row[8],
+            wasser_einheit: row[9],
+            payload_json: row[10],
+          });
+        },
+      });
+    }
 
     // Get wartezeiten
     result.wartezeiten = [];
-    db.exec({
-      sql: `
-        SELECT w.awg_wartezeit_nr, w.kultur, w.sortier_nr, w.tage, 
-               w.bemerkung_kode, w.anwendungsbereich, w.erlaeuterung, w.payload_json,
-               IFNULL(lk.label, w.kultur) as kultur_label
-        FROM bvl_awg_wartezeit w
-        LEFT JOIN bvl_lookup_kultur lk ON lk.code = w.kultur
-        WHERE w.awg_id = ? 
-        ORDER BY w.sortier_nr
-      `,
-      bind: [result.awg_id],
-      callback: (row) => {
-        result.wartezeiten.push({
-          awg_wartezeit_nr: row[0],
-          kultur: row[1],
-          sortier_nr: row[2],
-          tage: row[3],
-          bemerkung_kode: row[4],
-          anwendungsbereich: row[5],
-          erlaeuterung: row[6],
-          payload_json: row[7],
-          kultur_label: row[8],
-        });
-      },
-    });
+    if (wartezeitConfig) {
+      db.exec({
+        sql: wartezeitConfig.sql,
+        bind: [result.awg_id],
+        callback: (row) => {
+          result.wartezeiten.push({
+            kultur: row[0],
+            kultur_label: row[1],
+            sortier_nr: row[2],
+            tage: row[3],
+            bemerkung_kode: row[4],
+            anwendungsbereich: row[5],
+            erlaeuterung: row[6],
+            payload_json: row[7],
+          });
+        },
+      });
+    }
 
     // Get wirkstoffe (if table exists)
     result.wirkstoffe = [];
@@ -1777,42 +2533,154 @@ async function queryZulassung(payload) {
         },
       });
     }
-
-    // Check for extras/flags (bio, öko, etc.) if table exists
-    result.is_bio = false;
-    result.is_oeko = false;
-    result.certification_body = null;
-    let extrasTableExists = false;
-    db.exec({
-      sql: "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bvl_mittel_extras'",
-      callback: () => {
-        extrasTableExists = true;
-      },
-    });
-    if (extrasTableExists) {
-      db.exec({
-        sql: "SELECT * FROM bvl_mittel_extras WHERE kennr = ?",
-        bind: [result.kennr],
-        callback: (row) => {
-          result.extras = {};
-          const colNames = db.exec({
-            sql: "PRAGMA table_info(bvl_mittel_extras)",
-            returnValue: "resultRows",
-          });
-          colNames.forEach((col, idx) => {
-            result.extras[col[1]] = row[idx];
-          });
-          // Extract common bio fields
-          if (result.extras.is_bio) result.is_bio = !!result.extras.is_bio;
-          if (result.extras.is_oeko) result.is_oeko = !!result.extras.is_oeko;
-          if (result.extras.certification_body)
-            result.certification_body = result.extras.certification_body;
-        },
-      });
-    }
   }
 
   return results;
+}
+
+async function listBvlMittel(payload) {
+  if (!db) throw new Error("Database not initialized");
+
+  let limit = Number(payload?.limit);
+  if (Number.isNaN(limit) || limit <= 0) {
+    limit = 500;
+  }
+  limit = Math.min(Math.max(Math.floor(limit), 1), 5000);
+
+  const searchRaw = payload?.search ? String(payload.search).trim() : "";
+  const hasSearch = searchRaw.length > 0;
+  const searchNormalized = searchRaw.toLowerCase();
+
+  const mittelColumns = getTableColumns("bvl_mittel");
+  const hasPayload = mittelColumns.includes("payload_json");
+  const hasNameColumn = mittelColumns.includes("name");
+  const hasMittelnameColumn = mittelColumns.includes("mittelname");
+  const hasMittelNameAltColumn = mittelColumns.includes("mittel_name");
+  const hasFormColumn = mittelColumns.includes("formulierung");
+  const hasFormArtColumn = mittelColumns.includes("formulierung_art");
+  const hasZulEndeColumn = mittelColumns.includes("zul_ende");
+  const hasZulassungsendeColumn = mittelColumns.includes("zulassungsende");
+
+  const selectPieces = [
+    "m.kennr",
+    hasNameColumn
+      ? "m.name AS name"
+      : hasMittelnameColumn
+        ? "m.mittelname AS name"
+        : hasMittelNameAltColumn
+          ? "m.mittel_name AS name"
+          : "NULL AS name",
+    hasFormColumn
+      ? "m.formulierung AS formulierung"
+      : hasFormArtColumn
+        ? "m.formulierung_art AS formulierung"
+        : "NULL AS formulierung",
+    hasZulEndeColumn
+      ? "m.zul_ende AS zul_ende"
+      : hasZulassungsendeColumn
+        ? "m.zulassungsende AS zul_ende"
+        : "NULL AS zul_ende",
+    hasPayload ? "m.payload_json AS payload_json" : "NULL AS payload_json",
+  ];
+
+  let sql = `
+    SELECT ${selectPieces.join(", ")}
+    FROM bvl_mittel m
+  `;
+
+  const bindings = [];
+
+  if (hasSearch) {
+    const pattern = `%${searchNormalized}%`;
+    const searchExprs = ["LOWER(m.kennr) LIKE ?"];
+    if (hasNameColumn) {
+      searchExprs.push("LOWER(m.name) LIKE ?");
+    }
+    if (hasMittelnameColumn) {
+      searchExprs.push("LOWER(m.mittelname) LIKE ?");
+    }
+    if (hasMittelNameAltColumn) {
+      searchExprs.push("LOWER(m.mittel_name) LIKE ?");
+    }
+    if (hasPayload) {
+      searchExprs.push(
+        "LOWER(json_extract(m.payload_json, '$.mittelname')) LIKE ?"
+      );
+      searchExprs.push(
+        "LOWER(json_extract(m.payload_json, '$.mittel_name')) LIKE ?"
+      );
+      searchExprs.push(
+        "LOWER(json_extract(m.payload_json, '$.mittelName')) LIKE ?"
+      );
+    }
+
+    sql += ` WHERE ${searchExprs.map((expr) => `(${expr})`).join(" OR ")}`;
+    for (let i = 0; i < searchExprs.length; i += 1) {
+      bindings.push(pattern);
+    }
+  }
+
+  sql += " ORDER BY name COLLATE NOCASE";
+  sql += ` LIMIT ${limit}`;
+
+  const mittel = [];
+  const execOptions = {
+    sql,
+    callback: (row) => {
+      mittel.push({
+        kennr: row[0],
+        name: row[1],
+        formulierung: row[2],
+        zul_ende: row[3],
+        payload_json: row[4],
+      });
+    },
+  };
+
+  if (bindings.length) {
+    execOptions.bind = bindings;
+  }
+
+  db.exec(execOptions);
+
+  for (const entry of mittel) {
+    const payload = safeJsonParse(entry.payload_json);
+
+    const resolvedName = pickFirstNonEmpty(
+      entry.name,
+      payload?.mittelname,
+      payload?.mittel_name,
+      payload?.mittelName,
+      entry.kennr
+    );
+    entry.name = resolvedName ? String(resolvedName) : String(entry.kennr);
+
+    const resolvedFormulierung = pickFirstNonEmpty(
+      entry.formulierung,
+      payload?.formulierung,
+      payload?.formulierung_art
+    );
+    entry.formulierung =
+      resolvedFormulierung === null || resolvedFormulierung === undefined
+        ? null
+        : String(resolvedFormulierung).trim() || null;
+
+    const resolvedExpiry = pickFirstNonEmpty(
+      entry.zul_ende,
+      payload?.zul_ende,
+      payload?.zulassungsende,
+      payload?.gueltig_bis,
+      payload?.gueltigBis
+    );
+    entry.zul_ende =
+      resolvedExpiry === null || resolvedExpiry === undefined
+        ? null
+        : String(resolvedExpiry);
+
+    delete entry.payload_json;
+  }
+
+  return mittel;
 }
 
 async function listBvlCultures(payload) {
@@ -1821,24 +2689,71 @@ async function listBvlCultures(payload) {
   const withCount = payload?.withCount || false;
   const cultures = [];
 
-  let sql;
+  if (!hasTable("bvl_awg_kultur")) {
+    return cultures;
+  }
 
+  const columns = getTableColumns("bvl_awg_kultur");
+  const codeCol = pickColumn(
+    columns,
+    "kultur",
+    "kultur_kode",
+    "kulturcode",
+    "kultur_code"
+  );
+  if (!codeCol) {
+    return cultures;
+  }
+  const labelCol = pickColumn(
+    columns,
+    "label",
+    "kultur_label",
+    "kultur_text",
+    "kultur_bez",
+    "kulturname"
+  );
+  const excludeCol = pickColumn(
+    columns,
+    "ausgenommen",
+    "ausnahme",
+    "ausgeschl"
+  );
+
+  const lookupAvailable = hasTable("bvl_lookup_kultur");
+  const codeExpr = `TRIM(ak.${codeCol})`;
+  const labelBase = labelCol ? `TRIM(ak.${labelCol})` : codeExpr;
+  const fallbackLabelExpr = `COALESCE(NULLIF(${labelBase}, ''), ${codeExpr})`;
+  const labelExpr = lookupAvailable
+    ? `COALESCE(NULLIF(TRIM(lk.label), ''), ${fallbackLabelExpr})`
+    : fallbackLabelExpr;
+  const whereClause = excludeCol
+    ? `WHERE COALESCE(ak.${excludeCol}, 0) = 0`
+    : "";
+  const orderClause = "ORDER BY label COLLATE NOCASE";
+  const joinClause = lookupAvailable
+    ? `
+    LEFT JOIN bvl_lookup_kultur lk
+      ON TRIM(lk.code) = ${codeExpr}
+  `
+    : "";
+
+  let sql;
   if (withCount) {
     sql = `
-      SELECT ak.kultur, IFNULL(lk.label, ak.kultur) AS label, COUNT(*) AS count
+      SELECT ${codeExpr} AS code, ${labelExpr} AS label, COUNT(*) AS count
       FROM bvl_awg_kultur ak
-      LEFT JOIN bvl_lookup_kultur lk ON lk.code = ak.kultur
-      WHERE ak.ausgenommen = 0
-  GROUP BY ak.kultur, label
-  ORDER BY label COLLATE NOCASE
+      ${joinClause}
+      ${whereClause}
+      GROUP BY code, label
+      ${orderClause}
     `;
   } else {
     sql = `
-      SELECT DISTINCT ak.kultur, IFNULL(lk.label, ak.kultur) AS label
+      SELECT DISTINCT ${codeExpr} AS code, ${labelExpr} AS label
       FROM bvl_awg_kultur ak
-      LEFT JOIN bvl_lookup_kultur lk ON lk.code = ak.kultur
-  WHERE ak.ausgenommen = 0
-  ORDER BY label COLLATE NOCASE
+      ${joinClause}
+      ${whereClause}
+      ${orderClause}
     `;
   }
 
@@ -1862,24 +2777,71 @@ async function listBvlSchadorg(payload) {
   const withCount = payload?.withCount || false;
   const schadorg = [];
 
-  let sql;
+  if (!hasTable("bvl_awg_schadorg")) {
+    return schadorg;
+  }
 
+  const columns = getTableColumns("bvl_awg_schadorg");
+  const codeCol = pickColumn(
+    columns,
+    "schadorg",
+    "schadorg_kode",
+    "schadorgcode",
+    "schadorganismus"
+  );
+  if (!codeCol) {
+    return schadorg;
+  }
+  const labelCol = pickColumn(
+    columns,
+    "label",
+    "schadorg_label",
+    "schadorg_text",
+    "schadorganismus_text",
+    "schadorg_bez"
+  );
+  const excludeCol = pickColumn(
+    columns,
+    "ausgenommen",
+    "ausnahme",
+    "ausgeschl"
+  );
+
+  const lookupAvailable = hasTable("bvl_lookup_schadorg");
+  const codeExpr = `TRIM(aso.${codeCol})`;
+  const labelBase = labelCol ? `TRIM(aso.${labelCol})` : codeExpr;
+  const fallbackLabelExpr = `COALESCE(NULLIF(${labelBase}, ''), ${codeExpr})`;
+  const labelExpr = lookupAvailable
+    ? `COALESCE(NULLIF(TRIM(ls.label), ''), ${fallbackLabelExpr})`
+    : fallbackLabelExpr;
+  const whereClause = excludeCol
+    ? `WHERE COALESCE(aso.${excludeCol}, 0) = 0`
+    : "";
+  const orderClause = "ORDER BY label COLLATE NOCASE";
+  const joinClause = lookupAvailable
+    ? `
+    LEFT JOIN bvl_lookup_schadorg ls
+      ON TRIM(ls.code) = ${codeExpr}
+  `
+    : "";
+
+  let sql;
   if (withCount) {
     sql = `
-      SELECT aso.schadorg, IFNULL(ls.label, aso.schadorg) AS label, COUNT(*) AS count
+      SELECT ${codeExpr} AS code, ${labelExpr} AS label, COUNT(*) AS count
       FROM bvl_awg_schadorg aso
-      LEFT JOIN bvl_lookup_schadorg ls ON ls.code = aso.schadorg
-      WHERE aso.ausgenommen = 0
-  GROUP BY aso.schadorg, label
-  ORDER BY label COLLATE NOCASE
+      ${joinClause}
+      ${whereClause}
+      GROUP BY code, label
+      ${orderClause}
     `;
   } else {
     sql = `
-      SELECT DISTINCT aso.schadorg, IFNULL(ls.label, aso.schadorg) AS label
+      SELECT DISTINCT ${codeExpr} AS code, ${labelExpr} AS label
       FROM bvl_awg_schadorg aso
-      LEFT JOIN bvl_lookup_schadorg ls ON ls.code = aso.schadorg
-  WHERE aso.ausgenommen = 0
-  ORDER BY label COLLATE NOCASE
+      ${joinClause}
+      ${whereClause}
+      ${orderClause}
     `;
   }
 

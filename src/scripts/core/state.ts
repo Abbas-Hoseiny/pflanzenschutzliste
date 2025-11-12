@@ -34,11 +34,11 @@ export interface AppState {
   calcContext: any | null;
   zulassung: {
     filters: {
+      mittel: string | null;
       culture: string | null;
       pest: string | null;
       text: string;
       includeExpired: boolean;
-      bioOnly: boolean;
     };
     results: any[];
     lastSync: string | null;
@@ -64,6 +64,7 @@ export interface AppState {
     lookups: {
       cultures: any[];
       pests: any[];
+      mittel: any[];
     };
     autoUpdateAvailable: boolean;
     autoUpdateVersion: string | null;
@@ -111,11 +112,11 @@ let state: AppState = {
   calcContext: null,
   zulassung: {
     filters: {
+      mittel: null,
       culture: null,
       pest: null,
       text: "",
       includeExpired: false,
-      bioOnly: false,
     },
     results: [],
     lastSync: null,
@@ -134,7 +135,7 @@ let state: AppState = {
       manifest: null,
       lastAutoUpdateCheck: null,
     },
-    lookups: { cultures: [], pests: [] },
+    lookups: { cultures: [], pests: [], mittel: [] },
     autoUpdateAvailable: false,
     autoUpdateVersion: null,
   },
@@ -228,11 +229,11 @@ export function resetState(newState?: AppState): AppState {
     calcContext: null,
     zulassung: {
       filters: {
+        mittel: null,
         culture: null,
         pest: null,
         text: "",
         includeExpired: false,
-        bioOnly: false,
       },
       results: [],
       lastSync: null,
@@ -251,7 +252,7 @@ export function resetState(newState?: AppState): AppState {
         manifest: null,
         lastAutoUpdateCheck: null,
       },
-      lookups: { cultures: [], pests: [] },
+      lookups: { cultures: [], pests: [], mittel: [] },
       autoUpdateAvailable: false,
       autoUpdateVersion: null,
     },

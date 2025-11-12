@@ -4,7 +4,8 @@
  * Handles manifest-based data fetching from pflanzenschutz-db repository
  */
 
-const DEFAULT_MANIFEST_URL = "https://abbas-hoseiny.github.io/pflanzenschutz-db/manifest.json";
+const DEFAULT_MANIFEST_URL =
+  "https://abbas-hoseiny.github.io/pflanzenschutz-db/manifest.json";
 const MANIFEST_STORAGE_KEY = "bvlManifestUrl";
 
 export class ManifestError extends Error {
@@ -109,8 +110,14 @@ export async function fetchManifest(options = {}) {
  */
 function supportsBrotli() {
   try {
-    return typeof DecompressionStream !== "undefined" && 
-           new DecompressionStream("deflate") !== null; // Test with deflate first
+    if (typeof DecompressionStream === "undefined") {
+      return false;
+    }
+
+    // Some browsers expose DecompressionStream but do not support brotli.
+    // Attempt to instantiate the brotli codec to verify actual support.
+    const probe = new DecompressionStream("br");
+    return !!probe;
   } catch (e) {
     return false;
   }
@@ -120,26 +127,37 @@ function supportsBrotli() {
  * Select the best file format from manifest
  */
 export function selectBestFile(manifest) {
-  const files = manifest.files;
+  const files = manifest.files || [];
+
+  const resolveName = (file) => file?.path || file?.url || file?.name || "";
+
+  const findByExtension = (ext, predicate = () => true) =>
+    files.find((file) => {
+      const candidate = resolveName(file).toLowerCase();
+      return candidate.endsWith(ext) && predicate(file, candidate);
+    });
 
   // Prefer .sqlite.br if brotli is supported
   if (supportsBrotli()) {
-    const brFile = files.find((f) => f.path.endsWith(".sqlite.br"));
+    const brFile = findByExtension(".sqlite.br");
     if (brFile) {
       return { file: brFile, format: "brotli" };
     }
   }
 
-  // Fallback to plain .sqlite
-  const sqliteFile = files.find((f) => 
-    f.path.endsWith(".sqlite") && !f.path.includes(".")
-  );
+  // Fallback to plain .sqlite (uncompressed)
+  const sqliteFile = findByExtension(".sqlite", (file, candidate) => {
+    // skip .sqlite.br etc already handled; ensure not double extension beyond .sqlite
+    return (
+      !candidate.endsWith(".sqlite.br") && !candidate.endsWith(".sqlite.zip")
+    );
+  });
   if (sqliteFile) {
     return { file: sqliteFile, format: "plain" };
   }
 
   // Fallback to .sqlite.zip
-  const zipFile = files.find((f) => f.path.endsWith(".sqlite.zip"));
+  const zipFile = findByExtension(".sqlite.zip");
   if (zipFile) {
     return { file: zipFile, format: "zip" };
   }
@@ -164,10 +182,7 @@ export async function downloadFile(url, options = {}) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new DownloadError(
-        `Download failed: HTTP ${response.status}`,
-        url
-      );
+      throw new DownloadError(`Download failed: HTTP ${response.status}`, url);
     }
 
     const contentLength = parseInt(
@@ -272,11 +287,24 @@ async function decompressZip(compressedData) {
  */
 export async function downloadDatabase(manifest, options = {}) {
   const { onProgress = null } = options;
-  const baseUrl = manifest.base_url || "https://abbas-hoseiny.github.io/pflanzenschutz-db/";
-  
+  const baseUrl =
+    manifest.base_url || "https://abbas-hoseiny.github.io/pflanzenschutz-db/";
+
   // Select best file format
   const { file, format } = selectBestFile(manifest);
-  const fileUrl = new URL(file.path, baseUrl).toString();
+  let fileUrl;
+  if (file.url) {
+    fileUrl = file.url;
+  } else if (file.path) {
+    fileUrl = new URL(file.path, baseUrl).toString();
+  } else if (file.name) {
+    fileUrl = new URL(file.name, baseUrl).toString();
+  } else {
+    throw new DownloadError(
+      "Manifest file entry is missing url/path/name",
+      JSON.stringify(file)
+    );
+  }
 
   if (onProgress) {
     onProgress({
@@ -349,7 +377,7 @@ export async function checkForUpdates(currentHash) {
   try {
     const manifest = await fetchManifest();
     const manifestHash = manifest.hash || manifest.version;
-    
+
     return {
       available: currentHash !== manifestHash,
       manifest: manifest,

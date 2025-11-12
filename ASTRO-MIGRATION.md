@@ -41,18 +41,19 @@ Astro ist ein **Static Site Generator** mit folgenden Kern-Eigenschaften:
 
 ### ✅ Perfekte Passung
 
-| Anforderung | Astro-Feature | Nutzen |
-|-------------|---------------|--------|
-| Statisches Hosting | SSG (Static Site Generation) | GitHub Pages kompatibel |
-| Modulare Features | Island Components | Code-Splitting automatisch |
-| Browser-State | Client-Side Hydration | State bleibt im Browser |
-| SQLite-WASM | Client-Side Script | Funktioniert ohne Änderung |
-| Kein Backend | Pure Static Output | Keine Server-Kosten |
-| Performance | Zero-JS by Default | 80% weniger Client-JS |
+| Anforderung        | Astro-Feature                | Nutzen                     |
+| ------------------ | ---------------------------- | -------------------------- |
+| Statisches Hosting | SSG (Static Site Generation) | GitHub Pages kompatibel    |
+| Modulare Features  | Island Components            | Code-Splitting automatisch |
+| Browser-State      | Client-Side Hydration        | State bleibt im Browser    |
+| SQLite-WASM        | Client-Side Script           | Funktioniert ohne Änderung |
+| Kein Backend       | Pure Static Output           | Keine Server-Kosten        |
+| Performance        | Zero-JS by Default           | 80% weniger Client-JS      |
 
 ### 🎯 Konkrete Vorteile
 
 1. **Performance-Gewinn**
+
    ```
    Aktuell:  1,6 MB Assets → 4-15s Load Time
    Mit Astro: 400 KB Assets → 1-3s Load Time
@@ -60,24 +61,27 @@ Astro ist ein **Static Site Generator** mit folgenden Kern-Eigenschaften:
    ```
 
 2. **Developer Experience**
+
    ```
    Aktuell:  Kein Build, manuelle Optimierung
    Mit Astro: HMR, Auto-Optimization, TypeScript
    ```
 
 3. **Wartbarkeit**
+
    ```
    Aktuell:  1.187 Zeilen/File (Zulassung)
    Mit Astro: Komponenten-Aufteilung, Scoped CSS
    ```
 
 4. **Bundle-Größe**
+
    ```javascript
    // Aktuell: Alles lädt
-   import { initCalculation } from './features/calculation/index.js'; // Immer
-   
+   import { initCalculation } from "./features/calculation/index.js"; // Immer
+
    // Mit Astro: On-Demand
-   const Calculation = lazy(() => import('./components/Calculation.astro')); // Bei Bedarf
+   const Calculation = lazy(() => import("./components/Calculation.astro")); // Bei Bedarf
    ```
 
 ## Migrations-Strategie
@@ -129,28 +133,28 @@ pflanzenschutzliste/
 
 ```javascript
 // astro.config.mjs
-import { defineConfig } from 'astro/config';
+import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: 'https://abbas-hoseiny.github.io',
-  base: '/pflanzenschutzliste',
-  output: 'static',
+  site: "https://abbas-hoseiny.github.io",
+  base: "/pflanzenschutzliste",
+  output: "static",
   build: {
-    inlineStylesheets: 'auto',
-    assets: '_astro'
+    inlineStylesheets: "auto",
+    assets: "_astro",
   },
   vite: {
     build: {
       rollupOptions: {
         output: {
           manualChunks: {
-            'sqlite': ['./src/scripts/core/storage/sqlite.ts'],
-            'bvl': ['./src/scripts/core/bvlSync.ts']
-          }
-        }
-      }
-    }
-  }
+            sqlite: ["./src/scripts/core/storage/sqlite.ts"],
+            bvl: ["./src/scripts/core/bvlSync.ts"],
+          },
+        },
+      },
+    },
+  },
 });
 ```
 
@@ -229,7 +233,7 @@ const { title = 'Pflanzenschutz' } = Astro.props;
   <div id="app-root" class="app-root">
     <slot />
   </div>
-  
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     // Starfield-Animation (client-side)
@@ -260,7 +264,7 @@ const { title = 'Pflanzenschutz' } = Astro.props;
 <script>
   // Client-seitiges Navigation-Handling
   import { emit } from '../scripts/core/eventBus';
-  
+
   document.querySelectorAll('[data-section]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const section = (e.target as HTMLElement).dataset.section;
@@ -280,6 +284,7 @@ const { title = 'Pflanzenschutz' } = Astro.props;
 ```
 
 **Migration von `shell/index.js` → `Shell.astro`:**
+
 - ✅ HTML-Template in Astro-Komponente
 - ✅ Event-Handling in `<script>`-Tag
 - ✅ CSS bleibt identisch (oder scoped)
@@ -292,7 +297,7 @@ const { title = 'Pflanzenschutz' } = Astro.props;
 
 ```typescript
 // src/scripts/core/state.ts (vorher state.js)
-import { getDefaultFieldLabels } from './labels';
+import { getDefaultFieldLabels } from "./labels";
 
 export interface AppState {
   app: {
@@ -300,8 +305,8 @@ export interface AppState {
     version: string | null;
     hasFileAccess: boolean;
     hasDatabase: boolean;
-    activeSection: 'calc' | 'history' | 'zulassung' | 'settings' | 'reporting';
-    storageDriver: 'memory' | 'sqlite' | 'filesystem' | 'localstorage';
+    activeSection: "calc" | "history" | "zulassung" | "settings" | "reporting";
+    storageDriver: "memory" | "sqlite" | "filesystem" | "localstorage";
   };
   company: {
     name: string;
@@ -317,7 +322,6 @@ export interface AppState {
       pest: string | null;
       text: string;
       includeExpired: boolean;
-      bioOnly: boolean;
     };
     results: any[];
     // ... weitere Felder
@@ -328,7 +332,9 @@ export interface AppState {
 type StateListener = (state: AppState, prevState: AppState) => void;
 
 const listeners = new Set<StateListener>();
-let state: AppState = { /* ... */ };
+let state: AppState = {
+  /* ... */
+};
 
 export function getState(): AppState {
   return state;
@@ -343,6 +349,7 @@ export function subscribeState(listener: StateListener): () => void {
 ```
 
 **Vorteile:**
+
 - ✅ Type-Safety
 - ✅ Autocomplete in IDE
 - ✅ Frühere Fehler-Erkennung
@@ -374,10 +381,10 @@ const { defaults, mediums } = state;
         <!-- Formular-Felder -->
         <div class="mb-3">
           <label for="creator" class="form-label">Ersteller</label>
-          <input 
-            type="text" 
-            class="form-control" 
-            id="creator" 
+          <input
+            type="text"
+            class="form-control"
+            id="creator"
             value={defaults.form.creator}
           />
         </div>
@@ -386,7 +393,7 @@ const { defaults, mediums } = state;
           Berechnen
         </button>
       </form>
-      
+
       <div id="results" style="display: none;">
         <!-- Ergebnis-Anzeige -->
       </div>
@@ -398,20 +405,20 @@ const { defaults, mediums } = state;
   // Client-Side-Logik
   import { getState, subscribeState } from '../scripts/core/state';
   import { performCalculation } from '../scripts/features/calculation/logic';
-  
+
   const form = document.getElementById('calculation-form') as HTMLFormElement;
-  
+
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(form);
     const result = await performCalculation(formData);
     displayResults(result);
   });
-  
+
   function displayResults(result: any) {
     // Rendering-Logik
   }
-  
+
   // State-Subscription für Reaktivität
   subscribeState((state, prevState) => {
     if (state.app.activeSection === 'calc') {
@@ -430,6 +437,7 @@ const { defaults, mediums } = state;
 ```
 
 **Aufteilung:**
+
 ```
 src/scripts/features/calculation/
 ├── logic.ts           # Reine Berechnungs-Logik (keine UI)
@@ -439,13 +447,13 @@ src/scripts/features/calculation/
 
 **Migration-Mapping:**
 
-| Alt (Vanilla JS) | Neu (Astro) | Aufwand |
-|------------------|-------------|---------|
-| `features/calculation/index.js` | `components/Calculation.astro` + `scripts/features/calculation/` | 2 Tage |
-| `features/history/index.js` | `components/History.astro` + `scripts/features/history/` | 2 Tage |
-| `features/settings/index.js` | `components/Settings.astro` + `scripts/features/settings/` | 1 Tag |
-| `features/reporting/index.js` | `components/Reporting.astro` + `scripts/features/reporting/` | 2 Tage |
-| `features/zulassung/index.js` | `components/Zulassung.astro` + `scripts/features/zulassung/` | 3-4 Tage |
+| Alt (Vanilla JS)                | Neu (Astro)                                                      | Aufwand  |
+| ------------------------------- | ---------------------------------------------------------------- | -------- |
+| `features/calculation/index.js` | `components/Calculation.astro` + `scripts/features/calculation/` | 2 Tage   |
+| `features/history/index.js`     | `components/History.astro` + `scripts/features/history/`         | 2 Tage   |
+| `features/settings/index.js`    | `components/Settings.astro` + `scripts/features/settings/`       | 1 Tag    |
+| `features/reporting/index.js`   | `components/Reporting.astro` + `scripts/features/reporting/`     | 2 Tage   |
+| `features/zulassung/index.js`   | `components/Zulassung.astro` + `scripts/features/zulassung/`     | 3-4 Tage |
 
 **Aufwand:** 10-12 Tage
 
@@ -466,29 +474,29 @@ const History = await import('../components/History.astro');
 
 <BaseLayout title="Pflanzenschutz">
   <Shell />
-  
+
   <main data-region="main">
     <!-- Initial: Nur Berechnung laden -->
     <div data-section="calc" class="active">
       <Calculation client:load />
     </div>
-    
+
     <!-- Lazy: Andere Sections on-demand -->
     <div data-section="history" style="display: none;">
       <History.default client:idle />
     </div>
-    
+
     <div data-section="zulassung" style="display: none;">
       <Zulassung.default client:visible />
     </div>
-    
+
     <!-- ... -->
   </main>
 </BaseLayout>
 
 <script>
   import { emit, subscribe } from '../scripts/core/eventBus';
-  
+
   // Section-Wechsel-Logik
   subscribe('app:sectionChanged', (section) => {
     document.querySelectorAll('[data-section]').forEach(el => {
@@ -500,13 +508,13 @@ const History = await import('../components/History.astro');
 
 **Astro Client Directives:**
 
-| Directive | Wann hydrated | Use-Case |
-|-----------|---------------|----------|
-| `client:load` | Sofort beim Page-Load | Kritische Komponenten (Berechnung) |
-| `client:idle` | Wenn Browser idle | Wichtige Features (Historie) |
-| `client:visible` | Wenn im Viewport | Große Features (Zulassung) |
-| `client:media` | Media-Query matched | Responsive-Komponenten |
-| `client:only` | Nie server-side | Rein client-seitig (SQLite) |
+| Directive        | Wann hydrated         | Use-Case                           |
+| ---------------- | --------------------- | ---------------------------------- |
+| `client:load`    | Sofort beim Page-Load | Kritische Komponenten (Berechnung) |
+| `client:idle`    | Wenn Browser idle     | Wichtige Features (Historie)       |
+| `client:visible` | Wenn im Viewport      | Große Features (Zulassung)         |
+| `client:media`   | Media-Query matched   | Responsive-Komponenten             |
+| `client:only`    | Nie server-side       | Rein client-seitig (SQLite)        |
 
 **Code-Splitting-Konfiguration:**
 
@@ -519,25 +527,25 @@ export default defineConfig({
         output: {
           manualChunks(id) {
             // Vendor-Splitting
-            if (id.includes('node_modules')) {
-              return 'vendor';
+            if (id.includes("node_modules")) {
+              return "vendor";
             }
-            
+
             // Feature-Splitting
-            if (id.includes('features/zulassung')) {
-              return 'zulassung';
+            if (id.includes("features/zulassung")) {
+              return "zulassung";
             }
-            if (id.includes('features/calculation')) {
-              return 'calculation';
+            if (id.includes("features/calculation")) {
+              return "calculation";
             }
-            if (id.includes('storage/sqlite')) {
-              return 'sqlite';
+            if (id.includes("storage/sqlite")) {
+              return "sqlite";
             }
-          }
-        }
-      }
-    }
-  }
+          },
+        },
+      },
+    },
+  },
 });
 ```
 
@@ -589,23 +597,25 @@ On-Demand: +172 KB (wenn alle Features geladen)
 
 ```typescript
 // src/scripts/core/state.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { getState, patchState, subscribeState } from './state';
+import { describe, it, expect, beforeEach } from "vitest";
+import { getState, patchState, subscribeState } from "./state";
 
-describe('State Management', () => {
+describe("State Management", () => {
   beforeEach(() => {
     // Reset-Logik
   });
-  
-  it('should update state correctly', () => {
+
+  it("should update state correctly", () => {
     const initial = getState();
     patchState({ app: { ...initial.app, ready: true } });
     expect(getState().app.ready).toBe(true);
   });
-  
-  it('should notify subscribers', () => {
+
+  it("should notify subscribers", () => {
     let notified = false;
-    subscribeState(() => { notified = true; });
+    subscribeState(() => {
+      notified = true;
+    });
     patchState({ app: { ready: true } });
     expect(notified).toBe(true);
   });
@@ -616,20 +626,20 @@ describe('State Management', () => {
 
 ```typescript
 // tests/e2e/calculation.spec.ts
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test('should perform calculation', async ({ page }) => {
-  await page.goto('/');
-  
+test("should perform calculation", async ({ page }) => {
+  await page.goto("/");
+
   // Formular ausfüllen
-  await page.fill('#creator', 'Test User');
-  await page.fill('#location', 'Test Farm');
-  
+  await page.fill("#creator", "Test User");
+  await page.fill("#location", "Test Farm");
+
   // Berechnung ausführen
   await page.click('button[type="submit"]');
-  
+
   // Ergebnis prüfen
-  await expect(page.locator('#results')).toBeVisible();
+  await expect(page.locator("#results")).toBeVisible();
 });
 ```
 
@@ -644,9 +654,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
       - run: npm ci
-      - run: npm run test          # Unit-Tests
+      - run: npm run test # Unit-Tests
       - run: npx playwright install
-      - run: npm run test:e2e      # E2E-Tests
+      - run: npm run test:e2e # E2E-Tests
       - run: npm run build
       - uses: actions/upload-pages-artifact@v2
 ```
@@ -686,36 +696,46 @@ GESAMT: 30 Arbeitstage (6 Wochen)
 ## Risiken & Mitigation
 
 ### Risiko 1: SQLite-WASM Kompatibilität
+
 **Problem:** SQLite-Worker könnte in Astro-Build anders laden
 **Mitigation:**
+
 - Worker als statisches Asset in `public/`
 - Dynamischer Import mit `client:only`
 - Fallback auf Web-Worker-Polyfill
 
 ### Risiko 2: State-Management während SSG
+
 **Problem:** Server-Side hat keinen Browser-State
 **Mitigation:**
+
 - State nur client-side initialisieren
 - SSR deaktivieren für statische App (`output: 'static'`)
 - Hydration mit `client:load`
 
 ### Risiko 3: OPFS-Zugriff im Build
+
 **Problem:** OPFS funktioniert nur zur Laufzeit
 **Mitigation:**
+
 - Kein OPFS-Code im Build
 - Feature-Detection zur Laufzeit beibehalten
 - Komponenten mit `client:only="vanilla"`
 
 ### Risiko 4: Breaking Changes in Astro
+
 **Problem:** Astro ist noch aktiv in Entwicklung
 **Mitigation:**
+
 - LTS-Version verwenden (Astro 4.x)
 - Dependencies pinnen in `package.json`
 - Regelmäßige Updates mit Tests
 
 ### Risiko 5: Bootstrap-Kompatibilität
+
 **Problem:** Bootstrap JavaScript mit Astro
 **Mitigation:**
+
 - Bootstrap über CDN beibehalten (funktioniert)
 - Alternative: Bootstrap-Komponenten in Astro portieren
 - Oder: Tailwind CSS erwägen
@@ -723,6 +743,7 @@ GESAMT: 30 Arbeitstage (6 Wochen)
 ## Kosten-Nutzen-Analyse
 
 ### Aufwand
+
 - **Entwicklung:** 30 Arbeitstage (1 Person)
 - **Testing:** Integriert (4 Tage)
 - **Deployment-Setup:** 2 Tage
@@ -730,16 +751,17 @@ GESAMT: 30 Arbeitstage (6 Wochen)
 
 ### Nutzen (quantifiziert)
 
-| Metrik | Vorher | Nachher | Verbesserung |
-|--------|--------|---------|--------------|
-| Initial JavaScript | 360 KB | 50 KB | **-86%** |
-| Time to Interactive | 4,2s | 1,5s | **-64%** |
-| Total Assets | 1,6 MB | 400 KB | **-75%** |
-| Memory Footprint | 80 MB | 40 MB | **-50%** |
-| Lighthouse Score | 72 | 95 | **+32%** |
-| Build-Zeit | 0s | 10-20s | -10-20s (einmalig) |
+| Metrik              | Vorher | Nachher | Verbesserung       |
+| ------------------- | ------ | ------- | ------------------ |
+| Initial JavaScript  | 360 KB | 50 KB   | **-86%**           |
+| Time to Interactive | 4,2s   | 1,5s    | **-64%**           |
+| Total Assets        | 1,6 MB | 400 KB  | **-75%**           |
+| Memory Footprint    | 80 MB  | 40 MB   | **-50%**           |
+| Lighthouse Score    | 72     | 95      | **+32%**           |
+| Build-Zeit          | 0s     | 10-20s  | -10-20s (einmalig) |
 
 ### Qualitative Vorteile
+
 - ✅ TypeScript → Fewer Bugs
 - ✅ Hot Module Replacement → Faster Development
 - ✅ Component Scoping → Better Maintainability
@@ -747,6 +769,7 @@ GESAMT: 30 Arbeitstage (6 Wochen)
 - ✅ Modern Tooling → Better DX
 
 ### ROI-Berechnung
+
 ```
 Entwicklungs-Aufwand: 32 Tage × 8h = 256h
 
@@ -763,11 +786,14 @@ Break-Even: 3-6 Monate (geschätzt)
 ## Alternative Ansätze
 
 ### Option 1: Vite (ohne Framework)
+
 **Vorteile:**
+
 - ✅ Einfacher als Astro
 - ✅ Gleiche Optimierungen (Minification, Splitting)
 
 **Nachteile:**
+
 - ❌ Kein SSG (nur SPA)
 - ❌ Keine Component-Islands
 - ❌ Weniger Performance-Gewinn
@@ -775,11 +801,14 @@ Break-Even: 3-6 Monate (geschätzt)
 **Bewertung:** ⭐⭐⭐ (Okay, aber Astro besser)
 
 ### Option 2: Next.js / SvelteKit
+
 **Vorteile:**
+
 - ✅ Vollständige SSR/SSG-Lösung
 - ✅ Große Community
 
 **Nachteile:**
+
 - ❌ Overkill für statische App
 - ❌ React/Svelte-Abhängigkeit
 - ❌ Komplexere Migration
@@ -787,10 +816,13 @@ Break-Even: 3-6 Monate (geschätzt)
 **Bewertung:** ⭐⭐ (Zu komplex)
 
 ### Option 3: Parcel / Webpack
+
 **Vorteile:**
+
 - ✅ Bewährte Build-Tools
 
 **Nachteile:**
+
 - ❌ Kein SSG
 - ❌ Manuelle Konfiguration nötig
 - ❌ Weniger modern
@@ -798,10 +830,13 @@ Break-Even: 3-6 Monate (geschätzt)
 **Bewertung:** ⭐⭐ (Veraltet)
 
 ### Option 4: Bleiben bei No-Build
+
 **Vorteile:**
+
 - ✅ Keine Migration nötig
 
 **Nachteile:**
+
 - ❌ Alle Performance-Probleme bleiben
 - ❌ Technische Schulden wachsen
 - ❌ Keine moderne DX
@@ -813,6 +848,7 @@ Break-Even: 3-6 Monate (geschätzt)
 ## Zusammenfassung
 
 ### Warum Astro?
+
 1. ✅ **86% weniger JavaScript** zum Client
 2. ✅ **64% schnellere Load Time**
 3. ✅ **100% GitHub Pages kompatibel**
@@ -822,6 +858,7 @@ Break-Even: 3-6 Monate (geschätzt)
 7. ✅ **Bestehender Code** funktioniert weiter (ES-Module)
 
 ### Migration-Komplexität
+
 - **Einfach:** Layout, Shell, Styles (Woche 1-2)
 - **Mittel:** Core-Module zu TypeScript (Woche 2)
 - **Komplex:** Feature-Komponenten (Woche 3-4)
@@ -831,6 +868,7 @@ Break-Even: 3-6 Monate (geschätzt)
 **Gesamt:** 6 Wochen (überschaubar!)
 
 ### Empfehlung
+
 ✅ **Ja zur Astro-Migration!**
 
 Die Performance-Verbesserungen und Developer-Experience-Vorteile rechtfertigen den Aufwand. Die Migration ist technisch machbar, risikoarm und bietet sofortigen Mehrwert.

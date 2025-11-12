@@ -1,4 +1,4 @@
-import { getDefaultFieldLabels } from './labels.js';
+import { getDefaultFieldLabels } from "./labels.js";
 
 const listeners = new Set();
 
@@ -6,28 +6,28 @@ let state = {
   app: {
     ready: false,
     version: null,
-  hasFileAccess: false,
-  hasDatabase: false,
-    activeSection: 'calc',
-    storageDriver: 'memory'
+    hasFileAccess: false,
+    hasDatabase: false,
+    activeSection: "calc",
+    storageDriver: "memory",
   },
   company: {
-    name: '',
-    headline: '',
-    logoUrl: '',
-    contactEmail: '',
-    address: '',
-    accentColor: ''
+    name: "",
+    headline: "",
+    logoUrl: "",
+    contactEmail: "",
+    address: "",
+    accentColor: "",
   },
   defaults: {
     waterPerKisteL: 5,
     kistenProAr: 300,
     form: {
-      creator: '',
-      location: '',
-      crop: '',
-      quantity: ''
-    }
+      creator: "",
+      location: "",
+      crop: "",
+      quantity: "",
+    },
   },
   measurementMethods: [],
   mediums: [],
@@ -35,7 +35,7 @@ let state = {
   fieldLabels: getDefaultFieldLabels(),
   calcContext: null,
   zulassung: {
-    filters: { culture: null, pest: null, text: '', includeExpired: false, bioOnly: false },
+    filters: { culture: null, pest: null, text: "", includeExpired: false },
     results: [],
     lastSync: null,
     lastResultCounts: null,
@@ -44,17 +44,22 @@ let state = {
     manifestVersion: null,
     lastSyncHash: null,
     busy: false,
-    progress: { step: null, percent: 0, message: '' },
+    progress: { step: null, percent: 0, message: "" },
     error: null,
     logs: [],
-    debug: { schema: null, lastSyncLog: [], manifest: null, lastAutoUpdateCheck: null },
+    debug: {
+      schema: null,
+      lastSyncLog: [],
+      manifest: null,
+      lastAutoUpdateCheck: null,
+    },
     lookups: { cultures: [], pests: [] },
     autoUpdateAvailable: false,
-    autoUpdateVersion: null
+    autoUpdateVersion: null,
   },
   ui: {
-    notifications: []
-  }
+    notifications: [],
+  },
 };
 
 export function getState() {
@@ -75,7 +80,7 @@ function notify(prevState) {
     try {
       listener(state, prevState);
     } catch (err) {
-      console.error('state listener error', err);
+      console.error("state listener error", err);
     }
   }
 }
@@ -89,7 +94,8 @@ export function patchState(patch) {
 
 export function updateSlice(sliceKey, updater) {
   const currentSlice = state[sliceKey];
-  const nextSlice = typeof updater === 'function' ? updater(currentSlice, state) : updater;
+  const nextSlice =
+    typeof updater === "function" ? updater(currentSlice, state) : updater;
   if (nextSlice === currentSlice) {
     return state;
   }
@@ -101,28 +107,28 @@ export function resetState(newState = undefined) {
     app: {
       ready: false,
       version: null,
-  hasFileAccess: false,
-  hasDatabase: false,
-      activeSection: 'calc',
-      storageDriver: 'memory'
+      hasFileAccess: false,
+      hasDatabase: false,
+      activeSection: "calc",
+      storageDriver: "memory",
     },
     company: {
-      name: '',
-      headline: '',
-      logoUrl: '',
-      contactEmail: '',
-      address: '',
-      accentColor: ''
+      name: "",
+      headline: "",
+      logoUrl: "",
+      contactEmail: "",
+      address: "",
+      accentColor: "",
     },
     defaults: {
       waterPerKisteL: 5,
       kistenProAr: 300,
       form: {
-        creator: '',
-        location: '',
-        crop: '',
-        quantity: ''
-      }
+        creator: "",
+        location: "",
+        crop: "",
+        quantity: "",
+      },
     },
     measurementMethods: [],
     mediums: [],
@@ -130,7 +136,7 @@ export function resetState(newState = undefined) {
     fieldLabels: getDefaultFieldLabels(),
     calcContext: null,
     zulassung: {
-      filters: { culture: null, pest: null, text: '', includeExpired: false, bioOnly: false },
+      filters: { culture: null, pest: null, text: "", includeExpired: false },
       results: [],
       lastSync: null,
       lastResultCounts: null,
@@ -139,17 +145,22 @@ export function resetState(newState = undefined) {
       manifestVersion: null,
       lastSyncHash: null,
       busy: false,
-      progress: { step: null, percent: 0, message: '' },
+      progress: { step: null, percent: 0, message: "" },
       error: null,
       logs: [],
-      debug: { schema: null, lastSyncLog: [], manifest: null, lastAutoUpdateCheck: null },
+      debug: {
+        schema: null,
+        lastSyncLog: [],
+        manifest: null,
+        lastAutoUpdateCheck: null,
+      },
       lookups: { cultures: [], pests: [] },
       autoUpdateAvailable: false,
-      autoUpdateVersion: null
+      autoUpdateVersion: null,
     },
     ui: {
-      notifications: []
-    }
+      notifications: [],
+    },
   };
   const prevState = state;
   state = base;

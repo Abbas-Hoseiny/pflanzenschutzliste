@@ -24,12 +24,10 @@
 - Fehlerzustände prominent (Alert mit `bi-exclamation-triangle-fill`), Link "Debug anzeigen" öffnet Debug-Sektion.
 - Buttons disabled bei `busy`, Text `Synchronisiere…`. Bei Erfolg kurzer Toast/Alert: "Daten aktualisiert" mit Manifest-Version.
 
-### 2. Bio-Filter & Badges
+### 2. Bio-Hinweise (vorerst deaktiviert)
 
-- Filterleiste um Toggle/Checkbox "Nur Bio/Öko" erweitern. Filterzustand im State halten (`filters.bioOnly`).
-- SQL-Anpassung in `sqliteWorker.queryZulassung`: optionaler Join auf `bvl_mittel_enrichments` und Filter `is_bio = 1`. Ergebnisse sollen `result.is_bio` setzen.
-- Anzeige in Trefferliste: Bio-Badge (`badge bg-success-subtle text-success-emphasis`, Icon `bi-leaf-fill`) + Tooltip "Bio-zertifiziert – {certification_body}" falls verfügbar.
-- Gruppierung optional: Wenn `bioOnly` aktiv, Statuskarte zeigt Anzahl Bio-Mittel vs. Gesamt (aus `lastSyncCounts` oder Live-Zählung).
+- Bio-spezifische Filter und Badges wurden entfernt, bis die Datenbasis stabil gepflegt wird.
+- Hinweise aus Manifest/Enrichment dürfen weiterhin im Freitext erscheinen, beeinflussen aber keine UI-Elemente.
 
 ### 3. Detailkarten erweitern
 
@@ -73,7 +71,7 @@
 1. **Manuelle Tests** (Chrome, Firefox, Safari, iPadOS):
    - Initialer Sync nach Cache-Reset, Fortschrittsphasen korrekt?
    - Auto-Update-Banner erscheint bei neuer Manifest-Version (simulierte URL).
-   - Bio-Toggle filtert, Badge + Tooltip korrekt.
+   - Bio-spezifische Filter sind deaktiviert; vorhandene Texte dürfen weiterhin erscheinen.
    - Gefahrenabschnitte/Icons erscheinen nur, wenn Daten da.
    - Fehlerfälle (Offline, 404 Manifest) zeigen klare Meldungen.
 2. **Unit/Integration** (optional, aber empfohlen):
@@ -84,7 +82,7 @@
 ## Abnahme-Kriterien
 
 - Sync nutzt ausschließlich Manifestpfad und visualisiert jeden Schritt.
-- State speichert `bioOnly` und `is_bio` wird überall konsistent genutzt.
+- Bio-Gruppierung und Flags werden nicht mehr aktiv verwendet; keine UI-Abhängigkeiten mehr.
 - Ergebnisliste zeigt neue Icons/Farben, ohne Layout-Brüche bei fehlenden Daten.
 - Debug-Panel informiert über Manifest, Schema, Logs.
 - Auto-Update meldet verfügbare Versionen ohne kompletten Download.

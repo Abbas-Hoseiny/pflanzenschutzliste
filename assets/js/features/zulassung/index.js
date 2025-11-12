@@ -112,6 +112,8 @@ function renderAufwandRow(aufwand) {
 
   const mittelUnit = firstNonEmpty(
     aufwand.mittel_einheit,
+    aufwand.aufwandmenge_einheit,
+    aufwand.mittel_unit,
     payload.aufwandmenge_einheit,
     payload.m_aufwand_einheit,
     payload.max_aufwandmenge_einheit
@@ -119,6 +121,8 @@ function renderAufwandRow(aufwand) {
 
   const mittelValue = firstNonEmpty(
     aufwand.mittel_menge,
+    aufwand.mittel_value,
+    aufwand.aufwandmenge,
     payload.m_aufwand,
     payload.max_aufwandmenge,
     payload.m_aufwand_bis,
@@ -127,10 +131,16 @@ function renderAufwandRow(aufwand) {
   );
 
   const mittelFrom = firstNonEmpty(
+    aufwand.mittel_menge_min,
+    payload.mittel_menge_von,
+    payload.aufwandmenge_min,
     payload.m_aufwand_von,
     payload.max_aufwandmenge_von
   );
   const mittelTo = firstNonEmpty(
+    aufwand.mittel_menge_max,
+    payload.mittel_menge_bis,
+    payload.aufwandmenge_max,
     payload.m_aufwand_bis,
     payload.max_aufwandmenge_bis
   );
@@ -153,6 +163,7 @@ function renderAufwandRow(aufwand) {
 
   const wasserUnit = firstNonEmpty(
     aufwand.wasser_einheit,
+    aufwand.wasser_unit,
     payload.wassermenge_einheit,
     payload.w_aufwand_einheit,
     payload.w_aufwand_von_einheit,
@@ -161,6 +172,8 @@ function renderAufwandRow(aufwand) {
 
   const wasserValue = firstNonEmpty(
     aufwand.wasser_menge,
+    aufwand.wasser_value,
+    aufwand.wassermenge,
     payload.wassermenge,
     payload.w_aufwand,
     payload.w_aufwand_bis,
@@ -169,10 +182,16 @@ function renderAufwandRow(aufwand) {
   );
 
   const wasserFrom = firstNonEmpty(
+    aufwand.wasser_menge_min,
+    payload.wasser_menge_von,
+    payload.wassermenge_min,
     payload.w_aufwand_von,
     payload.wassermenge_von
   );
   const wasserTo = firstNonEmpty(
+    aufwand.wasser_menge_max,
+    payload.wasser_menge_bis,
+    payload.wassermenge_max,
     payload.w_aufwand_bis,
     payload.wassermenge_bis
   );
@@ -213,7 +232,7 @@ export function initZulassung(mainContainer, appServices) {
 
   services.events.subscribe("database:connected", async () => {
     await loadInitialData();
-    
+
     // Perform auto-update check after loading initial data
     setTimeout(() => {
       performAutoUpdateCheck();
@@ -227,14 +246,14 @@ async function performAutoUpdateCheck() {
   try {
     const state = services.state.getState();
     const currentHash = state.zulassung.lastSyncHash;
-    
+
     if (!currentHash) {
       // No sync yet, skip auto-update check
       return;
     }
 
     const updateCheck = await checkForUpdates(currentHash);
-    
+
     const checkTime = new Date().toISOString();
     services.state.updateSlice("zulassung", (prev) => ({
       ...prev,
@@ -244,7 +263,9 @@ async function performAutoUpdateCheck() {
         ...prev.debug,
         lastAutoUpdateCheck: {
           time: checkTime,
-          result: updateCheck.available ? `Update verfügbar: ${updateCheck.newVersion}` : "Keine Updates",
+          result: updateCheck.available
+            ? `Update verfügbar: ${updateCheck.newVersion}`
+            : "Keine Updates",
         },
       },
     }));
@@ -367,9 +388,7 @@ function renderStatusSection(zulassung) {
   const apiStand = zulassung.apiStand || null;
   const manifestVersion = zulassung.manifestVersion || null;
   const lastSyncHash = zulassung.lastSyncHash || null;
-  
-  // Count bio products if extras table exists
-  const bioCount = counts.bvl_mittel_extras || 0;
+
   const totalMittel = counts.mittel || counts.bvl_mittel || 0;
 
   return `
@@ -384,7 +403,7 @@ function renderStatusSection(zulassung) {
           ${lastSyncHash ? `<small class="text-muted">Hash: ${escapeHtml(lastSyncHash.substring(0, 12))}...</small><br>` : ""}
           <small class="mt-1 d-block">
             <i class="bi bi-database me-1"></i>
-            Mittel: ${totalMittel}${bioCount > 0 ? ` <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-leaf-fill"></i> ${bioCount} Bio</span>` : ""}, 
+            Mittel: ${totalMittel}, 
             Anwendungen: ${counts.awg || counts.bvl_awg || 0}, 
             Kulturen: ${counts.awg_kultur || counts.bvl_awg_kultur || 0}, 
             Schadorganismen: ${counts.awg_schadorg || counts.bvl_awg_schadorg || 0}
@@ -402,33 +421,51 @@ function renderSyncSection(zulassung) {
 
   // Map progress steps to icons and colors
   const stepInfo = {
-    manifest: { icon: 'bi-cloud-download', color: 'bg-info', label: 'Manifest' },
-    download: { icon: 'bi-cloud-arrow-down', color: 'bg-info', label: 'Download' },
-    decompress: { icon: 'bi-archive', color: 'bg-primary', label: 'Entpacken' },
-    import: { icon: 'bi-cpu', color: 'bg-warning', label: 'Import' },
-    verify: { icon: 'bi-check2', color: 'bg-success', label: 'Verifizierung' },
-    done: { icon: 'bi-check-circle-fill', color: 'bg-success', label: 'Fertig' },
+    manifest: {
+      icon: "bi-cloud-download",
+      color: "bg-info",
+      label: "Manifest",
+    },
+    download: {
+      icon: "bi-cloud-arrow-down",
+      color: "bg-info",
+      label: "Download",
+    },
+    decompress: { icon: "bi-archive", color: "bg-primary", label: "Entpacken" },
+    import: { icon: "bi-cpu", color: "bg-warning", label: "Import" },
+    verify: { icon: "bi-check2", color: "bg-success", label: "Verifizierung" },
+    done: {
+      icon: "bi-check-circle-fill",
+      color: "bg-success",
+      label: "Fertig",
+    },
   };
 
-  const currentStep = progress.step ? stepInfo[progress.step] || stepInfo.done : null;
+  const currentStep = progress.step
+    ? stepInfo[progress.step] || stepInfo.done
+    : null;
 
   return `
     <div class="card mb-3">
       <div class="card-body">
         <h5 class="card-title"><i class="bi bi-arrow-repeat me-2"></i>Synchronisation</h5>
         
-        ${zulassung.autoUpdateAvailable ? `
+        ${
+          zulassung.autoUpdateAvailable
+            ? `
           <div class="alert alert-warning d-flex align-items-center" role="alert">
             <i class="bi bi-exclamation-triangle-fill me-2"></i>
             <div class="flex-grow-1">
               <strong>Neue Daten verfügbar!</strong><br>
-              <small>Version ${escapeHtml(zulassung.autoUpdateVersion || 'unbekannt')} ist verfügbar.</small>
+              <small>Version ${escapeHtml(zulassung.autoUpdateVersion || "unbekannt")} ist verfügbar.</small>
             </div>
             <button class="btn btn-warning btn-sm ms-2" id="btn-apply-update">
               <i class="bi bi-download me-1"></i>Jetzt aktualisieren
             </button>
           </div>
-        ` : ''}
+        `
+            : ""
+        }
         
         <button 
           id="btn-sync" 
@@ -437,7 +474,7 @@ function renderSyncSection(zulassung) {
         >
           ${
             isBusy
-              ? `<span class="spinner-border spinner-border-sm me-2"></span><i class="${currentStep?.icon || 'bi-arrow-repeat'} me-1"></i>`
+              ? `<span class="spinner-border spinner-border-sm me-2"></span><i class="${currentStep?.icon || "bi-arrow-repeat"} me-1"></i>`
               : '<i class="bi bi-arrow-repeat me-1"></i>'
           }
           ${isBusy ? "Synchronisiere..." : "Daten aktualisieren"}
@@ -449,8 +486,8 @@ function renderSyncSection(zulassung) {
           <div class="mt-3">
             <div class="d-flex justify-content-between align-items-center mb-2">
               <small class="text-muted">
-                <i class="${currentStep?.icon || 'bi-arrow-repeat'} me-1"></i>
-                ${currentStep?.label || 'Verarbeite'}: ${escapeHtml(progress.message)}
+                <i class="${currentStep?.icon || "bi-arrow-repeat"} me-1"></i>
+                ${currentStep?.label || "Verarbeite"}: ${escapeHtml(progress.message)}
               </small>
               <small class="text-muted">${progress.percent}%</small>
             </div>
@@ -460,7 +497,7 @@ function renderSyncSection(zulassung) {
                  aria-valuemax="100"
                  title="${escapeHtml(progress.message)}">
               <div 
-                class="progress-bar progress-bar-striped progress-bar-animated ${currentStep?.color || 'bg-primary'}" 
+                class="progress-bar progress-bar-striped progress-bar-animated ${currentStep?.color || "bg-primary"}" 
                 style="width: ${progress.percent}%"
               >
                 ${progress.percent}%
@@ -552,21 +589,6 @@ function renderFilterSection(zulassung) {
             </select>
           </div>
           
-          <div class="col-md-4">
-            <label class="form-label d-block">&nbsp;</label>
-            <div class="form-check">
-              <input 
-                class="form-check-input" 
-                type="checkbox" 
-                id="filter-bio"
-                ${filters.bioOnly ? "checked" : ""}
-              >
-              <label class="form-check-label" for="filter-bio">
-                <i class="bi bi-leaf-fill text-success me-1"></i>
-                Nur Bio/Öko-zertifizierte Mittel
-              </label>
-            </div>
-          </div>
         </div>
         
         <div class="form-check mt-3">
@@ -629,8 +651,6 @@ function renderResultsSection(zulassung) {
 
 function renderResultItem(result) {
   const status = result.status_json ? JSON.parse(result.status_json) : {};
-  const isBio = result.is_bio || result.is_oeko || (result.extras && (result.extras.is_bio || result.extras.is_oeko));
-  const certBody = result.certification_body || (result.extras && result.extras.certification_body);
 
   return `
     <div class="list-group-item">
@@ -657,11 +677,6 @@ function renderResultItem(result) {
               )}</span>`
             : ""
         }
-        ${
-          isBio
-            ? `<span class="badge bg-success-subtle text-success-emphasis me-1" title="${certBody ? `Bio-zertifiziert – ${escapeHtml(certBody)}` : 'Bio/Öko-zertifiziert'}"><i class="bi bi-leaf-fill me-1"></i>Bio/Öko</span>`
-            : ""
-        }
       </div>
       
       ${
@@ -671,18 +686,19 @@ function renderResultItem(result) {
           <strong><i class="bi bi-droplet me-1"></i>Wirkstoffe:</strong>
           <ul class="small mb-0">
             ${result.wirkstoffe
-              .map(
-                (w) => {
-                  const gehalt = coerceNumber(w.gehalt);
-                  const gehaltStr = gehalt !== null ? numberFormatter.format(gehalt) : String(w.gehalt || "");
-                  return `
+              .map((w) => {
+                const gehalt = coerceNumber(w.gehalt);
+                const gehaltStr =
+                  gehalt !== null
+                    ? numberFormatter.format(gehalt)
+                    : String(w.gehalt || "");
+                return `
                     <li>
                       ${escapeHtml(w.wirkstoff_name || w.wirkstoff || "-")}
                       ${w.gehalt ? ` - ${escapeHtml(gehaltStr)} ${escapeHtml(w.einheit || "")}` : ""}
                     </li>
                   `;
-                }
-              )
+              })
               .join("")}
           </ul>
         </div>
@@ -721,17 +737,15 @@ function renderResultItem(result) {
           <strong><i class="bi bi-exclamation-triangle me-1"></i>Gefahrenhinweise:</strong>
           <div class="d-flex flex-wrap gap-1">
             ${result.gefahrhinweise
-              .map(
-                (g) => {
-                  const code = g.hinweis_kode || g.h_code || g.h_saetze || "";
-                  const text = g.hinweis_text || g.text || "";
-                  return `
+              .map((g) => {
+                const code = g.hinweis_kode || g.h_code || g.h_saetze || "";
+                const text = g.hinweis_text || g.text || "";
+                return `
                     <span class="badge bg-danger" title="${escapeHtml(text)}" data-bs-toggle="tooltip">
                       ${escapeHtml(code)}${text ? ` <i class="bi bi-info-circle-fill ms-1"></i>` : ""}
                     </span>
                   `;
-                }
-              )
+              })
               .join("")}
           </div>
         </div>
@@ -938,10 +952,10 @@ function renderDebugSection(zulassung) {
                       log.level === "error"
                         ? "bg-danger"
                         : log.level === "warn"
-                        ? "bg-warning"
-                        : log.level === "debug"
-                        ? "bg-secondary"
-                        : "bg-primary";
+                          ? "bg-warning"
+                          : log.level === "debug"
+                            ? "bg-secondary"
+                            : "bg-primary";
                     return `<div><span class="badge ${badgeClass} me-1">${log.level.toUpperCase()}</span> ${escapeHtml(
                       log.message
                     )}</div>`;
@@ -1008,7 +1022,6 @@ function attachEventHandlers(section) {
   const filterPest = section.querySelector("#filter-pest");
   const filterText = section.querySelector("#filter-text");
   const filterExpired = section.querySelector("#filter-expired");
-  const filterBio = section.querySelector("#filter-bio");
   const btnApplyUpdate = section.querySelector("#btn-apply-update");
 
   if (filterCulture) {
@@ -1049,15 +1062,6 @@ function attachEventHandlers(section) {
       services.state.updateSlice("zulassung", (prev) => ({
         ...prev,
         filters: { ...prev.filters, includeExpired: e.target.checked },
-      }));
-    });
-  }
-
-  if (filterBio) {
-    filterBio.addEventListener("change", (e) => {
-      services.state.updateSlice("zulassung", (prev) => ({
-        ...prev,
-        filters: { ...prev.filters, bioOnly: e.target.checked },
       }));
     });
   }
@@ -1179,7 +1183,7 @@ async function handleSearch() {
 function handleClearFilters() {
   services.state.updateSlice("zulassung", (prev) => ({
     ...prev,
-    filters: { culture: null, pest: null, text: "", includeExpired: false, bioOnly: false },
+    filters: { culture: null, pest: null, text: "", includeExpired: false },
     results: [],
   }));
 

@@ -392,6 +392,16 @@ export async function listBvlSchadorg(options: any = {}): Promise<any> {
 }
 
 /**
+ * List BVL Mittel lookup
+ */
+export async function listBvlMittel(options: any = {}): Promise<any> {
+  if (!worker) {
+    throw new Error("Database not initialized");
+  }
+  return await callWorker("listBvlMittel", options);
+}
+
+/**
  * Diagnose BVL schema
  */
 export async function diagnoseBvlSchema(): Promise<any> {
