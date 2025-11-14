@@ -112,10 +112,6 @@ function createToolbar(): HTMLElement {
         <i class="bi bi-eye"></i>
         <span class="ms-1">Vorschau</span>
       </button>
-      <button type="button" class="btn btn-outline-light" data-action="template-print">
-        <i class="bi bi-printer"></i>
-        <span class="ms-1">Drucken</span>
-      </button>
     </div>
     <div class="ms-auto d-flex align-items-center gap-2">
       <div class="btn-group btn-group-sm" role="group" aria-label="Rasteroptionen">

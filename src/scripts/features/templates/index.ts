@@ -42,6 +42,7 @@ import {
   GRID_CELL_SIZE,
   GRID_COLUMNS,
   GRID_ROWS,
+  GRID_PADDING,
   clampLayout,
   layoutToStyle,
   pixelRectFromElement,
@@ -603,7 +604,7 @@ function renderEditor(
     for (const field of state.fields) {
       fragment.appendChild(createFieldElement(field, store, view, state));
     }
-  layer.appendChild(fragment);
+    layer.appendChild(fragment);
   } else {
     const selection = new Set(state.selectedFieldIds);
     layer
@@ -733,10 +734,8 @@ function setupFieldInteractions(
 
   const getLayerBounds = () => {
     const layer = view.fieldLayer;
-    const width =
-      layer?.clientWidth ?? GRID_COLUMNS * GRID_CELL_SIZE;
-    const height =
-      layer?.clientHeight ?? GRID_ROWS * GRID_CELL_SIZE;
+    const width = layer?.clientWidth ?? GRID_COLUMNS * GRID_CELL_SIZE;
+    const height = layer?.clientHeight ?? GRID_ROWS * GRID_CELL_SIZE;
     return { width, height };
   };
 
@@ -790,9 +789,7 @@ function setupFieldInteractions(
     const { cellWidth, cellHeight } = getCellDimensions();
     const startLeft = parseFloat(element.dataset.left ?? "0");
     const startTop = parseFloat(element.dataset.top ?? "0");
-    const width = parseFloat(
-      element.dataset.width ?? `${element.offsetWidth}`
-    );
+    const width = parseFloat(element.dataset.width ?? `${element.offsetWidth}`);
     const height = parseFloat(
       element.dataset.height ?? `${element.offsetHeight}`
     );
@@ -857,8 +854,7 @@ function setupFieldInteractions(
     }
     event.preventDefault();
     const pointerId = event.pointerId;
-    const edges =
-      handle.dataset.edges?.split(/\s+/).filter(Boolean) ?? [];
+    const edges = handle.dataset.edges?.split(/\s+/).filter(Boolean) ?? [];
     if (!edges.length) {
       return;
     }
@@ -900,10 +896,7 @@ function setupFieldInteractions(
       let bottomEdge = movingSouth ? startBottom + deltaY : startBottom;
 
       if (movingWest) {
-        leftEdge = Math.min(
-          Math.max(0, leftEdge),
-          rightEdge - minWidth
-        );
+        leftEdge = Math.min(Math.max(0, leftEdge), rightEdge - minWidth);
       } else {
         leftEdge = startLeft;
       }
@@ -918,10 +911,7 @@ function setupFieldInteractions(
       }
 
       if (movingNorth) {
-        topEdge = Math.min(
-          Math.max(0, topEdge),
-          bottomEdge - minHeight
-        );
+        topEdge = Math.min(Math.max(0, topEdge), bottomEdge - minHeight);
       } else {
         topEdge = startTop;
       }
@@ -938,10 +928,7 @@ function setupFieldInteractions(
       if (store.getState().snapping) {
         if (movingWest) {
           leftEdge = Math.round(leftEdge / cellWidth) * cellWidth;
-          leftEdge = Math.min(
-            Math.max(0, leftEdge),
-            rightEdge - minWidth
-          );
+          leftEdge = Math.min(Math.max(0, leftEdge), rightEdge - minWidth);
         }
         if (movingEast) {
           rightEdge = Math.round(rightEdge / cellWidth) * cellWidth;
@@ -952,10 +939,7 @@ function setupFieldInteractions(
         }
         if (movingNorth) {
           topEdge = Math.round(topEdge / cellHeight) * cellHeight;
-          topEdge = Math.min(
-            Math.max(0, topEdge),
-            bottomEdge - minHeight
-          );
+          topEdge = Math.min(Math.max(0, topEdge), bottomEdge - minHeight);
         }
         if (movingSouth) {
           bottomEdge = Math.round(bottomEdge / cellHeight) * cellHeight;
@@ -995,13 +979,7 @@ function setupFieldInteractions(
         const layout = pixelsToGrid(rect);
         store.updateFieldLayout(fieldId, layout);
       } else {
-        updatePosition(
-          element,
-          startLeft,
-          startTop,
-          startWidth,
-          startHeight
-        );
+        updatePosition(element, startLeft, startTop, startWidth, startHeight);
       }
     };
 
@@ -1114,11 +1092,6 @@ function setupPaletteDragAndDrop(
     }
 
     dropIndicator.style.left = `${cellX * cellWidth}px`;
-    dropIndicator.style.top = `${cellY * cellHeight}px`;
-    dropIndicator.style.width = `${DEFAULT_FIELD_SIZE.w * cellWidth}px`;
-    dropIndicator.style.height = `${DEFAULT_FIELD_SIZE.h * cellHeight}px`;
-    dropIndicator.classList.remove("d-none");
-    dropPosition = { x: cellX, y: cellY };
   };
 
   const readDragType = (dataTransfer: DataTransfer): FieldType | null => {
@@ -1251,6 +1224,412 @@ function setupPaletteDragAndDrop(
   window.addEventListener("drop", resetDragState);
 }
 
+function formatDateTime(value?: string | null): string {
+  if (!value) {
+    return new Date().toLocaleString("de-DE");
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date().toLocaleString("de-DE");
+  }
+  return parsed.toLocaleString("de-DE");
+}
+
+type TemplateOutputPayload = {
+  title: string;
+  styles: string;
+  content: string;
+};
+
+function buildTemplateOutput(state: EditorState): TemplateOutputPayload {
+  const layoutMeta = state.layoutMeta ?? {
+    columns: GRID_COLUMNS,
+    rows: GRID_ROWS,
+    cellWidth: GRID_CELL_SIZE,
+    cellHeight: GRID_CELL_SIZE,
+    padding: GRID_PADDING,
+  };
+  const columns = Math.max(1, layoutMeta.columns ?? GRID_COLUMNS);
+  const rows = Math.max(1, layoutMeta.rows ?? GRID_ROWS);
+  const cellWidth = layoutMeta.cellWidth ?? GRID_CELL_SIZE;
+  const cellHeight = layoutMeta.cellHeight ?? GRID_CELL_SIZE;
+  const padding = layoutMeta.padding ?? GRID_PADDING;
+  const pageWidth = columns * cellWidth + padding * 2;
+  const pageHeight = rows * cellHeight + padding * 2;
+
+  const usableWidth = pageWidth - padding * 2;
+  const columnWidth = usableWidth / columns;
+  const rowHeight = (pageHeight - padding * 2) / rows;
+
+  const title = state.name?.trim()
+    ? `Vorlage - ${state.name.trim()}`
+    : "Vorlage";
+
+  const styles = `
+    :root { color-scheme: only light; }
+    body {
+      background: #f5f6f8;
+      margin: 0;
+      padding: 32px;
+      font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+      color: #111;
+      line-height: 1.45;
+      display: flex;
+      justify-content: center;
+    }
+    .template-print {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      width: 100%;
+    }
+    .template-print__meta {
+      width: ${pageWidth}px;
+      max-width: 100%;
+    }
+    .template-print__meta h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.75rem;
+      letter-spacing: 0.02em;
+    }
+    .template-print__description {
+      margin: 0 0 1rem;
+      font-size: 0.95rem;
+      color: rgba(17, 17, 17, 0.72);
+    }
+    .template-print__meta-list {
+      display: flex;
+      flex-wrap: wrap;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      gap: 1.25rem;
+      font-size: 0.85rem;
+    }
+    .template-print__meta-list li strong {
+      font-weight: 600;
+      color: rgba(17, 17, 17, 0.85);
+    }
+    .template-print__page {
+      width: ${pageWidth}px;
+      height: ${pageHeight}px;
+      background: #fff;
+      border-radius: 18px;
+      border: 1px solid rgba(18, 21, 24, 0.16);
+      box-shadow: 0 20px 60px rgba(15, 18, 24, 0.12);
+      padding: ${padding}px;
+      box-sizing: border-box;
+      position: relative;
+      overflow: hidden;
+    }
+    .template-print__grid {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    .template-print__field {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 8px;
+      padding: 12px 16px;
+      box-sizing: border-box;
+      background: rgba(246, 248, 250, 0.85);
+      border: 1px solid rgba(18, 21, 24, 0.08);
+      border-radius: 8px;
+    }
+    .template-print__field-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.95rem;
+      letter-spacing: 0.01em;
+      color: rgba(18, 21, 24, 0.9);
+    }
+    .template-print__field-label {
+      font-weight: 600;
+      color: #11131a;
+    }
+    .template-print__field-meta {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: rgba(18, 21, 24, 0.5);
+    }
+    .template-print__field-body {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: flex-end;
+    }
+    .template-print__field-input {
+      flex: 1 1 auto;
+      display: block;
+      border: none;
+      min-height: ${Math.max(28, rowHeight - 24)}px;
+      background: transparent;
+      font-size: 0.92rem;
+      color: rgba(18, 21, 24, 0.72);
+      padding: 6px 0;
+    }
+    .template-print__field-input span {
+      opacity: 0.6;
+    }
+    .template-print__field-input[data-type="number"] {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .template-print__field--label {
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: #101216;
+      border: none;
+      background: transparent;
+    }
+    .template-print__field--align-center { text-align: center; }
+    .template-print__field--align-right {
+      text-align: right;
+      align-items: flex-end;
+    }
+    .template-print__label-text {
+      display: block;
+      width: 100%;
+    }
+    .template-print__field.is-required .template-print__field-label::after {
+      content: "*";
+      margin-left: 4px;
+      color: #c62828;
+      font-weight: 700;
+    }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .template-print__page {
+        box-shadow: none;
+        border-color: transparent;
+      }
+      .template-print__meta {
+        width: 100%;
+        max-width: none;
+      }
+    }
+  `;
+
+  const safeName = escapeHtml(state.name || "Unbenannte Vorlage");
+  const description = state.description?.trim();
+  const metaList = "";
+
+  const sortedFields = [...state.fields].sort((a, b) => {
+    const layerDiff = (a.layout.layer ?? 0) - (b.layout.layer ?? 0);
+    if (layerDiff !== 0) {
+      return layerDiff;
+    }
+    if (a.layout.y !== b.layout.y) {
+      return a.layout.y - b.layout.y;
+    }
+    return a.layout.x - b.layout.x;
+  });
+
+  const fieldsHtml = sortedFields
+    .map((field) => renderTemplatePrintField(field))
+    .join("\n");
+
+  const descriptionBlock = description
+    ? `<p class="template-print__description">${escapeHtml(description)}</p>`
+    : "";
+
+  const content = `
+    <section class="template-print" aria-label="Vorlagenvorschau">
+      <header class="template-print__meta">
+        <h1>${safeName}</h1>
+        ${descriptionBlock}
+        ${metaList}
+      </header>
+      <div class="template-print__page" role="img" aria-label="Vorlage">
+        <div class="template-print__grid">
+          ${fieldsHtml || ""}
+        </div>
+      </div>
+    </section>
+  `;
+
+  return {
+    title,
+    styles,
+    content,
+  };
+}
+
+function renderTemplatePrintField(field: EditorField): string {
+  const layoutMeta = activeStore?.getState().layoutMeta ?? {
+    columns: GRID_COLUMNS,
+    rows: GRID_ROWS,
+    cellWidth: GRID_CELL_SIZE,
+    cellHeight: GRID_CELL_SIZE,
+    padding: GRID_PADDING,
+  };
+
+  const cellWidth = layoutMeta.cellWidth ?? GRID_CELL_SIZE;
+  const cellHeight = layoutMeta.cellHeight ?? GRID_CELL_SIZE;
+  const padding = layoutMeta.padding ?? GRID_PADDING;
+
+  const left = padding + field.layout.x * cellWidth;
+  const top = padding + field.layout.y * cellHeight;
+  const width = field.layout.w * cellWidth;
+  const height = field.layout.h * cellHeight;
+  const style = `left: ${left}px; top: ${top}px; width: ${width}px; height: ${height}px;`;
+  const alignClass = field.layout.align
+    ? ` template-print__field--align-${field.layout.align}`
+    : "";
+  const label = escapeHtml(field.label || field.name);
+  if (field.type === "label") {
+    return `<div class="template-print__field template-print__field--label${alignClass}" style="${style}"><span class="template-print__label-text">${label}</span></div>`;
+  }
+
+  const placeholder = field.placeholder?.trim()
+    ? escapeHtml(field.placeholder.trim())
+    : "";
+  const typeLabel = FIELD_TYPE_LABELS[field.type] ?? field.type;
+
+  return `<div class="template-print__field template-print__field--${field.type}${alignClass}${field.required ? " is-required" : ""}" style="${style}">
+    <div class="template-print__field-header">
+      <span class="template-print__field-label">${label}</span>
+      <span class="template-print__field-meta">${escapeHtml(typeLabel)}</span>
+    </div>
+    <div class="template-print__field-body">
+      <div class="template-print__field-input" data-type="${field.type}">
+        <span class="template-print__input-placeholder">${placeholder}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function openTemplatePreviewWindow(payload: TemplateOutputPayload): boolean {
+  let preview: Window | null = null;
+  try {
+    preview = window.open("about:blank", "_blank", "width=1024,height=768");
+  } catch (error) {
+    console.warn("Vorschau konnte nicht geöffnet werden", error);
+  }
+  if (!preview) {
+    return false;
+  }
+
+  const safeTitle = escapeHtml(payload.title);
+  let wrote = false;
+  let blobUrl: string | null = null;
+  try {
+    const doc = preview.document;
+    doc.open();
+    doc.write(
+      '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8" /><title>' +
+        safeTitle +
+        "</title><style>" +
+        payload.styles +
+        "</style></head><body></body></html>"
+    );
+    doc.close();
+    const body = doc.body;
+    if (body) {
+      body.innerHTML = payload.content;
+    }
+    wrote = true;
+  } catch (error) {
+    console.warn(
+      "Direktes Schreiben in die Vorschau ist fehlgeschlagen",
+      error
+    );
+  }
+
+  if (!wrote) {
+    try {
+      const html = `<!DOCTYPE html>
+  <html lang="de">
+    <head>
+      <meta charset="utf-8" />
+      <title>${safeTitle}</title>
+      <style>${payload.styles}</style>
+    </head>
+    <body>
+      ${payload.content}
+    </body>
+  </html>`;
+      const blob = new Blob([html], { type: "text/html" });
+      blobUrl = URL.createObjectURL(blob);
+      preview.location.href = blobUrl;
+      preview.addEventListener(
+        "load",
+        () => {
+          if (blobUrl) {
+            URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
+          }
+          try {
+            (preview as Window).focus();
+          } catch (focusError) {
+            console.warn(
+              "Vorschaufenster konnte nach Blob-Ladung nicht fokussiert werden",
+              focusError
+            );
+          }
+        },
+        { once: true }
+      );
+      wrote = true;
+    } catch (blobError) {
+      console.error(
+        "Fallback zum Laden der Vorschau aus einem Blob ist fehlgeschlagen",
+        blobError
+      );
+      return false;
+    }
+  }
+
+  if (wrote) {
+    try {
+      preview.focus();
+    } catch (error) {
+      console.warn("Vorschaufenster konnte nicht fokussiert werden", error);
+    }
+  }
+  return wrote;
+}
+
+function handleTemplatePreview(
+  view: TemplateEditorView,
+  store: EditorStore
+): void {
+  const state = store.getState();
+  if (!state.fields.length) {
+    showTemplateNotification(
+      view,
+      "Füge mindestens ein Feld hinzu, um eine Vorschau zu öffnen.",
+      {
+        kind: "info",
+        duration: 3500,
+      }
+    );
+    return;
+  }
+
+  const payload = buildTemplateOutput(state);
+  const opened = openTemplatePreviewWindow(payload);
+  if (!opened) {
+    showTemplateNotification(
+      view,
+      "Vorschau konnte nicht geöffnet werden. Bitte Pop-up Blocker prüfen.",
+      {
+        kind: "warning",
+        duration: 5000,
+      }
+    );
+  }
+}
+
 function setupToolbar(
   view: TemplateEditorView,
   store: EditorStore,
@@ -1296,15 +1675,7 @@ function setupToolbar(
         store.toggleSnapping();
         break;
       case "template-preview":
-      case "template-print":
-        showTemplateNotification(
-          view,
-          "Diese Funktion ist noch nicht implementiert.",
-          {
-            kind: "info",
-            duration: 4000,
-          }
-        );
+        handleTemplatePreview(view, store);
         break;
       case "template-undo":
         if (store.getState().undoStack.length) {
